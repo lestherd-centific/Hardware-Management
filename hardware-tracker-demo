@@ -1,0 +1,2275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hardware Tracker — Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --c-violet:#6d28d9; --c-violet-soft:#f1eafe; --c-pink:#ec4899; --c-pink-soft:#fdeef7;
+    --bg:#f7f6fb; --panel:#ffffff; --ink:#1c1b29; --sub:#68657a;
+    --border:#e7e3f0; --hover-bg:#faf9fd; --note-bg:#fbf8ff; --footer-muted:#b4afc4;
+    --st-instock:#2563eb; --st-instock-bg:#e7edfd;
+    --st-inuse:#16a34a; --st-inuse-bg:#e6f7ec;
+    --st-broken:#dc2626; --st-broken-bg:#fdeaea;
+    --drop-green:#16a34a; --drop-green-bg:rgba(22,163,74,.06); --drop-green-bg-active:rgba(22,163,74,.16);
+  }
+  html[data-theme="dark"]{
+    --c-violet:#a684f5; --c-violet-soft:#2a2140; --c-pink:#f472b6; --c-pink-soft:#38233a;
+    --bg:#15141d; --panel:#1e1c29; --ink:#f1eef8; --sub:#9c98b0;
+    --border:#33314a; --hover-bg:#262433; --note-bg:#211f30; --footer-muted:#57546c;
+    --st-instock:#7aa8fb; --st-instock-bg:#1c2745;
+    --st-inuse:#5fdb95; --st-inuse-bg:#183226;
+    --st-broken:#f9847c; --st-broken-bg:#3c2020;
+    --drop-green:#5fdb95; --drop-green-bg:rgba(95,219,149,.1); --drop-green-bg-active:rgba(95,219,149,.22);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'DM Sans',-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);transition:background-color .15s,color .15s;}
+  header{background:var(--panel);border-bottom:1px solid var(--border);padding:18px 24px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;}
+  .eyebrow{font-size:11px;font-weight:700;letter-spacing:.09em;color:var(--c-violet);text-transform:uppercase;margin-bottom:4px;}
+  header h1{font-size:20px;margin:0;font-weight:500;color:var(--ink);}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  input[type=text]{padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit;background:var(--panel);color:var(--ink);}
+  select{font-family:inherit;background:var(--panel);color:var(--ink);}
+  button{padding:8px 12px;border:1px solid var(--border);border-radius:7px;background:var(--panel);font-size:13px;cursor:pointer;color:var(--ink);font-family:inherit;}
+  button.primary{background:var(--c-violet);color:#fff;border-color:var(--c-violet);}
+  button:hover{filter:brightness(0.97);}
+  main{padding:20px 24px 8px;}
+
+  .quickmove{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;position:relative;}
+  .quickmove h3{margin:0 0 10px 0;font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;}
+  .qm-hint{font-size:11.5px;color:var(--sub);margin:-6px 0 10px;}
+  .quickmove .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+  .qm-input-wrap{position:relative;flex:1;min-width:220px;}
+  .qm-tag-box{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:6px 8px;background:var(--panel);}
+  .qm-tag-box:focus-within{border-color:var(--c-violet);}
+  .qm-tags{display:contents;}
+  .qm-tag{display:inline-flex;align-items:center;gap:5px;background:var(--c-violet-soft);color:var(--c-violet);border-radius:999px;padding:3px 6px 3px 10px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .qm-tag button{border:none;background:none;color:inherit;cursor:pointer;font-size:13px;line-height:1;padding:0 2px;font-family:inherit;}
+  .qm-tag button:hover{color:var(--st-broken);}
+  .qm-tag-box input[type=text]{flex:1;min-width:140px;border:none;background:transparent;padding:4px 2px;}
+  .qm-tag-box input[type=text]:focus{outline:none;}
+  .qm-suggestions{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.25);max-height:220px;overflow-y:auto;z-index:6;display:none;}
+  .qm-suggestions.open{display:block;}
+  .qm-suggestions .item{padding:8px 12px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--border);}
+  .qm-suggestions .item:last-child{border-bottom:none;}
+  .qm-suggestions .item:hover{background:var(--c-violet-soft);}
+  .qm-suggestions .item b{color:var(--ink);}
+  .qm-suggestions .item .where{color:var(--sub);}
+  .qm-feedback{font-size:12.5px;margin-top:8px;}
+  .qm-feedback.ok{color:var(--st-inuse);}
+  .qm-feedback.err{color:var(--st-broken);}
+
+  .model-summary{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;}
+  .model-summary h3{margin:0 0 10px 0;font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;}
+  .model-table{width:100%;border-collapse:collapse;font-size:13px;}
+  .model-table th{text-align:left;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;padding:6px 10px;border-bottom:1px solid var(--border);}
+  .model-table th.num,.model-table td.num{text-align:right;}
+  .model-table td{padding:7px 10px;border-bottom:1px solid var(--border);}
+  .model-table tbody tr:hover{background:var(--hover-bg);}
+  .model-table tbody tr:last-child td{border-bottom:none;}
+  .model-table tfoot td{padding:8px 10px;font-weight:700;border-top:2px solid var(--border);border-bottom:none;}
+  .model-table .status-num.instock{color:var(--st-instock);}
+  .model-table .status-num.inuse{color:var(--st-inuse);}
+  .model-table .status-num.broken{color:var(--st-broken);}
+  .model-table-wrap{max-height:380px;overflow-y:auto;}
+  .model-table thead th{position:sticky;top:0;background:var(--panel);z-index:2;}
+  .model-table tfoot td{position:sticky;bottom:0;background:var(--panel);}
+  .model-row-click{cursor:pointer;}
+
+  .layout{display:flex;gap:20px;align-items:flex-start;}
+
+  .panel-main{flex:1 1 62%;background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;min-width:0;}
+  .panel-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;background:linear-gradient(90deg,var(--c-violet-soft),transparent);}
+  .panel-head h2{margin:0;font-size:15px;font-weight:600;}
+  .panel-head .tag{font-size:11px;color:var(--c-violet);font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
+  .head-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .pin-btn,.icon-btn{font-size:11px;padding:5px 9px;border-radius:6px;border:1px solid var(--border);background:var(--panel);cursor:pointer;white-space:nowrap;font-family:inherit;color:var(--ink);}
+  .pin-btn:hover,.icon-btn:hover{filter:brightness(0.97);}
+  .pin-btn.unpin{color:var(--c-violet);border-color:var(--c-violet);background:var(--c-violet-soft);}
+  .icon-btn.archive{color:var(--st-broken);border-color:var(--st-broken);}
+  .count-pill{background:var(--c-violet);color:#fff;font-size:12px;padding:2px 10px;border-radius:999px;font-weight:600;}
+
+  .panel-tabs{display:flex;gap:6px;align-items:center;padding:8px 16px 0;border-bottom:1px solid var(--border);}
+  .tab-btn{border:none;background:none;padding:6px 10px;border-radius:8px 8px 0 0;font-size:12px;font-weight:600;color:var(--sub);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;}
+  .tab-btn:hover{color:var(--ink);}
+  .tab-btn.active{color:var(--c-violet);background:var(--c-violet-soft);}
+  .tab-count{font-size:10px;font-weight:700;opacity:.8;background:rgba(0,0,0,.06);border-radius:999px;padding:1px 6px;}
+  .tab-btn.active .tab-count{background:rgba(255,255,255,.5);}
+  .tab-add-btn{margin-left:auto;border:1px solid var(--c-violet);color:var(--c-violet);background:var(--c-violet-soft);font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .tab-add-btn:hover{filter:brightness(0.97);}
+
+  .archived-panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;}
+  .archived-panel-head{padding:10px 16px;font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);background:var(--hover-bg);display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
+  .archived-panel-head:hover{color:var(--ink);}
+  .archived-panel.collapsed .archived-item{display:none;}
+  .archived-panel.collapsed .archived-panel-head{border-bottom:none;}
+  .archived-toggle{font-size:11px;}
+  .archived-item{display:flex;justify-content:space-between;align-items:center;padding:9px 16px;border-bottom:1px solid var(--border);font-size:13px;}
+  .archived-item-actions{display:flex;gap:6px;align-items:center;}
+  .archived-item:last-child{border-bottom:none;}
+  .archived-item .meta{color:var(--sub);font-size:11.5px;}
+  .restore-btn{font-size:11px;padding:5px 9px;border-radius:6px;border:1px solid var(--c-violet);color:var(--c-violet);background:var(--c-violet-soft);cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .restore-btn:hover{filter:brightness(0.97);}
+
+  .drop-target{max-height:0;margin:0 16px;padding:0 12px;border:2px dashed transparent;border-radius:9px;background:var(--drop-green-bg);color:var(--drop-green);font-size:12px;font-weight:600;text-align:center;overflow:hidden;opacity:0;transition:max-height .18s ease,opacity .15s ease,margin .18s ease,padding .18s ease,border-color .15s,background .15s;}
+  body.dragging-device .drop-target[data-kind="hardware"]{max-height:60px;margin:10px 16px;padding:9px 12px;border-color:var(--drop-green);opacity:1;}
+  body.dragging-accessory .drop-target[data-kind="accessory"]{max-height:60px;margin:10px 16px;padding:9px 12px;border-color:var(--drop-green);opacity:1;}
+  .drop-target.dragover{background:var(--drop-green-bg-active);border-color:var(--drop-green);}
+
+  .dd-modal{width:420px;max-height:82vh;overflow-y:auto;}
+  .dd-modal-head{display:flex;justify-content:space-between;align-items:flex-start;}
+  .dd-modal-head h3{margin:0;}
+  .dd-close-x{border:none;background:none;font-size:16px;cursor:pointer;color:var(--sub);line-height:1;padding:2px;}
+  .dd-close-x:hover{color:var(--ink);}
+  .dd-meta{font-size:13px;color:var(--sub);line-height:1.8;margin:6px 0 16px;padding:10px 12px;background:var(--bg);border-radius:8px;}
+  .dd-meta b{color:var(--ink);}
+  .dd-status-chip{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;}
+  .dd-section-label{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;margin:0 0 6px;}
+  .dd-list{max-height:170px;overflow-y:auto;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:2px 12px;}
+  .dd-note-item{font-size:12.5px;color:var(--ink);padding:7px 0;border-bottom:1px dashed var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+  .dd-note-item:last-child{border-bottom:none;}
+  .dd-note-item .txt{flex:1;}
+  .dd-note-item .date{color:var(--sub);font-size:11px;white-space:nowrap;}
+  .dd-note-del{background:none;border:none;color:var(--st-broken);cursor:pointer;font-size:12px;opacity:.6;flex-shrink:0;}
+  .dd-note-del:hover{opacity:1;}
+  .dd-note-input{width:100%;min-height:60px;padding:8px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;background:var(--panel);color:var(--ink);}
+
+  .col-labels.full,.row.full{grid-template-columns:20px minmax(60px,1fr) minmax(70px,1.4fr) minmax(70px,1.4fr) 118px;}
+  .col-labels.compact,.row.compact{grid-template-columns:18px minmax(50px,1fr) minmax(60px,1.2fr) 100px;}
+  .col-labels.full.loc,.row.full.loc{grid-template-columns:20px minmax(50px,0.9fr) minmax(60px,1.1fr) minmax(60px,1.1fr) 106px minmax(90px,0.9fr);}
+  .col-labels.compact.loc,.row.compact.loc{grid-template-columns:18px minmax(45px,0.9fr) minmax(55px,1fr) 96px minmax(85px,0.9fr);}
+  .col-labels.acc.full,.row.acc.full{grid-template-columns:20px minmax(60px,1fr) minmax(50px,0.8fr) minmax(80px,1.2fr) 100px minmax(80px,0.9fr) 22px;}
+  .col-labels.acc.compact,.row.acc.compact{grid-template-columns:18px minmax(55px,1fr) minmax(45px,0.8fr) 92px minmax(75px,0.9fr) 22px;}
+  .acc-del-btn{border:none;background:none;color:var(--sub);cursor:pointer;font-size:12px;opacity:.55;padding:0;}
+  .acc-del-btn:hover{opacity:1;color:var(--st-broken);}
+  .col-labels{display:grid;gap:8px;padding:8px 16px;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);}
+  .rows-list{max-height:560px;overflow-y:auto;}
+  .rows-list.dragover{background:var(--c-violet-soft);}
+  .row{display:grid;gap:8px;align-items:center;padding:7px 16px;border-bottom:1px solid var(--border);font-size:12.8px;cursor:grab;}
+  .row:hover{background:var(--hover-bg);}
+  .row:active{cursor:grabbing;}
+  .row .handle{color:var(--sub);opacity:.5;font-size:13px;}
+  .row .cell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .row .cell.serial{font-weight:600;color:var(--ink);}
+  .row .cell.dd-open{cursor:pointer;text-decoration:underline;text-decoration-color:transparent;transition:text-decoration-color .1s;}
+  .row .cell.dd-open:hover{text-decoration-color:currentColor;}
+  .note-badge{font-size:10px;color:var(--c-violet);margin-left:3px;font-weight:600;}
+  .row .cell.sub{color:var(--sub);}
+  .sortable-col{cursor:pointer;user-select:none;}
+  .sortable-col:hover{color:var(--ink);}
+  .row select{font-size:12px;padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:var(--panel);color:var(--ink);max-width:100%;}
+  .status-select.instock{color:var(--st-instock);background:var(--st-instock-bg);border-color:transparent;}
+  .status-select.inuse{color:var(--st-inuse);background:var(--st-inuse-bg);border-color:transparent;}
+  .status-select.broken{color:var(--st-broken);background:var(--st-broken-bg);border-color:transparent;}
+  .empty-hint{color:var(--sub);font-size:12px;text-align:center;padding:24px 6px;}
+  .empty-hint.small{padding:10px 6px;font-size:11.5px;}
+
+  .loc-group{width:100%;}
+  .loc-group-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 16px;font-size:10.5px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;background:var(--hover-bg);border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+  .loc-group:first-child .loc-group-head{border-top:none;}
+  .loc-count{font-weight:600;opacity:.75;}
+  .loc-del-btn{border:none;background:none;color:var(--sub);cursor:pointer;font-size:10.5px;font-family:inherit;text-transform:none;letter-spacing:normal;opacity:.7;padding:0 2px;white-space:nowrap;}
+  .loc-del-btn:hover{opacity:1;color:var(--st-broken);}
+  .settings-loc-row{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border:1px solid var(--border);border-radius:6px;margin-top:6px;font-size:13px;}
+  .settings-loc-row .loc-del-btn{font-size:13px;}
+
+  .sidebar{flex:1 1 38%;display:flex;flex-direction:column;gap:14px;min-width:0;}
+  .mini-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:grab;}
+  .mini-card:active{cursor:grabbing;}
+  .mini-card.card-dragover{outline:2px dashed var(--c-pink);outline-offset:-2px;}
+  .mini-card .panel-head{background:linear-gradient(90deg,var(--c-pink-soft),transparent);}
+  .mini-card .panel-head .tag{color:var(--c-pink);}
+  .mini-card .count-pill{background:var(--c-pink);}
+  .mini-card .rows-list{max-height:260px;}
+  .mini-card.minimized .col-labels,.mini-card.minimized .rows-list,.mini-card.minimized .drop-target{display:none;}
+  .card-handle{color:var(--sub);opacity:.55;margin-right:4px;font-size:13px;}
+  .minimize-btn{font-size:12px;line-height:1;padding:5px 8px;}
+
+  aside.log{margin-top:20px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
+  aside.log h3{margin:0 0 8px 0;font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;}
+  #logList{max-height:420px;overflow-y:auto;}
+  .log-entry{font-size:12.5px;color:var(--sub);padding:6px 0;border-bottom:1px dashed var(--border);}
+  .log-entry:last-child{border-bottom:none;}
+  .log-entry b{color:var(--ink);}
+
+  .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(28,27,41,.35);align-items:center;justify-content:center;z-index:10;}
+  .modal-backdrop.open{display:flex;}
+  .modal{background:var(--panel);color:var(--ink);border-radius:12px;padding:20px;width:340px;}
+  .modal.modal-wide{width:560px;max-width:90vw;max-height:85vh;overflow-y:auto;}
+  .modal h3{margin-top:0;font-weight:600;}
+  .modal label{display:block;font-size:12px;color:var(--sub);margin-top:10px;margin-bottom:4px;}
+  .modal input,.modal select{width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--panel);color:var(--ink);}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .suggest-wrap{position:relative;}
+  .suggest-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.25);max-height:170px;overflow-y:auto;z-index:20;display:none;}
+  .suggest-dropdown.open{display:block;}
+  .suggest-dropdown .item{padding:7px 12px;font-size:12.5px;cursor:pointer;border-bottom:1px solid var(--border);}
+  .suggest-dropdown .item:last-child{border-bottom:none;}
+  .suggest-dropdown .item:hover{background:var(--c-violet-soft);}
+  .md-breakdown-list{max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;}
+  .md-breakdown-row{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border);font-size:13px;}
+  .md-breakdown-row:last-child{border-bottom:none;}
+  .md-breakdown-row .proj{font-weight:600;}
+  .md-breakdown-row .proj .master-tag{font-weight:500;color:var(--sub);font-size:11px;margin-left:6px;}
+  .md-breakdown-row .qty{background:var(--c-violet-soft);color:var(--c-violet);border-radius:999px;padding:2px 12px;font-weight:700;font-size:12.5px;}
+  .model-tag-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .model-tag{display:inline-flex;align-items:center;gap:5px;background:var(--c-violet-soft);color:var(--c-violet);border-radius:999px;padding:3px 6px 3px 10px;font-size:12px;font-weight:600;white-space:nowrap;}
+  .model-tag button{border:none;background:none;color:inherit;cursor:pointer;font-size:13px;line-height:1;padding:0 2px;font-family:inherit;}
+  .model-tag button:hover{color:var(--st-broken);}
+
+  footer.note{margin:20px 24px 8px;font-size:12.5px;color:var(--sub);line-height:1.5;background:var(--note-bg);border:1px solid var(--border);padding:12px 14px;border-radius:10px;}
+  footer.brand{text-align:center;color:var(--footer-muted);font-size:11px;padding:18px 0 28px;}
+
+  @media (max-width: 900px){
+    .layout{flex-direction:column;}
+    .col-labels{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Hardware Tracker</div>
+    <h1>Master Inventory &amp; Project Allocations</h1>
+  </div>
+  <div class="toolbar">
+    <input type="text" id="search" placeholder="Search asset tag, model, serial, or tag (e.g. Tablet)...">
+    <button id="addProjectBtn">+ Project</button>
+    <button id="addAssetBtn" class="primary">+ Asset</button>
+    <button id="exportBtn">Export JSON</button>
+    <button id="importBtn">Import JSON</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+    <button id="themeToggle" title="Toggle dark mode">🌙 Dark</button>
+  </div>
+</header>
+
+<main>
+
+  <div class="quickmove">
+    <h3>Move by serial number</h3>
+    <div class="qm-hint">Pick devices from the suggestions (or type a serial and press comma / Enter) to stack up multiple, then move them all at once.</div>
+    <div class="row">
+      <div class="qm-input-wrap">
+        <div class="qm-tag-box" id="qm-tag-box">
+          <div class="qm-tags" id="qm-tags"></div>
+          <input type="text" id="qm-serial" placeholder="Type or scan a serial number...">
+        </div>
+        <div class="qm-suggestions" id="qm-suggestions"></div>
+      </div>
+      <select id="qm-dest"></select>
+      <button id="qm-move-btn" class="primary">Move</button>
+    </div>
+    <div class="qm-feedback" id="qm-feedback"></div>
+  </div>
+
+  <div class="model-summary">
+    <h3>Availability by model</h3>
+    <div class="panel-tabs" id="summary-tabs" style="padding:0 0 8px;border-bottom:none;margin-bottom:4px;">
+      <button class="tab-btn" data-summary-tab="hardware">🖥 Hardware</button>
+      <button class="tab-btn" data-summary-tab="accessories">🎒 Accessories</button>
+    </div>
+    <div class="model-table-wrap" id="hw-model-table-wrap">
+      <table class="model-table">
+        <thead>
+          <tr><th>Model</th><th class="num">In Master</th><th class="num">In stock</th><th class="num">In use</th><th class="num">Broken</th></tr>
+        </thead>
+        <tbody id="model-table-body"></tbody>
+        <tfoot id="model-table-foot"></tfoot>
+      </table>
+    </div>
+    <div class="model-table-wrap" id="acc-model-table-wrap" style="display:none;">
+      <table class="model-table">
+        <thead>
+          <tr><th>Accessory</th><th>Project</th><th>Location</th><th class="num">Quantity</th></tr>
+        </thead>
+        <tbody id="acc-model-table-body"></tbody>
+        <tfoot id="acc-model-table-foot"></tfoot>
+      </table>
+    </div>
+  </div>
+
+  <div class="layout">
+    <div class="panel-main" id="main-panel"></div>
+    <div class="sidebar" id="sidebar-panel"></div>
+  </div>
+
+  <aside class="log">
+    <h3>Recent activity</h3>
+    <div id="logList"></div>
+  </aside>
+
+  <footer class="note">
+    This demo runs entirely in your browser (data saved to this browser only, via localStorage). To make it a
+    real shared tool where the team's changes reflect for everyone, the front end needs to talk to a shared
+    backend instead of localStorage — either a SharePoint list via the Microsoft Graph API (stays inside
+    Centific's tenant, reuses existing sign-in and permissions) or a small database like Supabase (faster to
+    wire up, lives outside the tenant). Hosting itself would be GitHub Pages or Vercel either way.
+  </footer>
+  <footer class="brand">Internal prototype · Centific</footer>
+</main>
+
+<div class="modal-backdrop" id="assetChooserBackdrop">
+  <div class="modal">
+    <h3>Add asset</h3>
+    <div style="font-size:12.5px;color:var(--sub);margin:-8px 0 14px;">What kind of asset are you adding?</div>
+    <button id="chooser-device-btn" class="primary" style="width:100%;text-align:left;">🖥 Hardware Device<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Laptops, tablets, and other tracked production hardware</span></button>
+    <button id="chooser-accessory-btn" style="width:100%;text-align:left;margin-top:8px;">🎒 Accessory<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Tripods, lux meters, and other lower-priority gear</span></button>
+    <div class="modal-actions">
+      <button id="chooser-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deviceModalBackdrop">
+  <div class="modal">
+    <h3>Add device</h3>
+    <label>Asset tag (optional)</label><input id="d-tag" placeholder="e.g. RED-0142">
+    <label>Model</label>
+    <div class="suggest-wrap">
+      <input id="d-model" placeholder="e.g. Surface Laptop 6" autocomplete="off">
+      <div class="suggest-dropdown" id="d-model-suggest"></div>
+    </div>
+    <label>Serial number</label><input id="d-serial" placeholder="e.g. SN-88213">
+    <label>Status</label>
+    <select id="d-status"><option value="instock">In stock</option><option value="inuse">In use</option><option value="broken">Broken</option></select>
+    <label>Starting location</label>
+    <select id="d-bucket"></select>
+    <div class="modal-actions">
+      <button id="d-cancel">Cancel</button>
+      <button id="d-save" class="primary">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modelDetailBackdrop">
+  <div class="modal modal-wide">
+    <h3 id="md-title">Model name</h3>
+    <div id="md-subtitle" style="font-size:12.5px;color:var(--sub);margin:-8px 0 4px;">Hardware model</div>
+    <div id="md-count" style="font-size:12.5px;color:var(--sub);margin-bottom:10px;"></div>
+
+    <div class="md-breakdown-list" id="md-breakdown-list"></div>
+
+    <label style="margin-top:14px;">Name tags</label>
+    <div class="qm-hint">Add a tag (e.g. "Tablet") so this model can be found later from the search bar at the top.</div>
+    <div class="model-tag-chips" id="md-tag-chips"></div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <input type="text" id="md-tag-input" placeholder="e.g. Tablet" style="flex:1;">
+      <button id="md-add-tag-btn" class="primary" style="width:auto;white-space:nowrap;">+ Add tag</button>
+    </div>
+
+    <div class="modal-actions">
+      <button id="md-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="projectModalBackdrop">
+  <div class="modal">
+    <h3>Add project</h3>
+    <label>Project name</label><input id="p-name" placeholder="e.g. Project Nova">
+    <div class="modal-actions">
+      <button id="p-cancel">Cancel</button>
+      <button id="p-save" class="primary">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="accessoryModalBackdrop">
+  <div class="modal">
+    <h3>Add accessory</h3>
+    <label>Model / description</label>
+    <div class="suggest-wrap">
+      <input id="acc-model" placeholder="e.g. Manfrotto Tripod" autocomplete="off">
+      <div class="suggest-dropdown" id="acc-model-suggest"></div>
+    </div>
+    <label>Asset tag (optional)</label><input id="acc-tag" placeholder="e.g. ACC-014">
+    <label>Serial number (optional)</label><input id="acc-serial" placeholder="e.g. SN-88213">
+    <label>Status</label>
+    <select id="acc-status"><option value="instock">In stock</option><option value="inuse">In use</option><option value="broken">Broken</option></select>
+    <label>Project</label>
+    <select id="acc-bucket"></select>
+    <label>Location</label>
+    <select id="acc-location"></select>
+    <div class="modal-actions">
+      <button id="acc-cancel">Cancel</button>
+      <button id="acc-save" class="primary">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="projectSettingsBackdrop">
+  <div class="modal">
+    <h3>Project settings</h3>
+    <div id="settings-modal-sub" style="font-size:12.5px;color:var(--sub);margin:-8px 0 12px;"></div>
+
+    <div id="settings-rename-section">
+      <label>Project name</label>
+      <div style="display:flex;gap:8px;">
+        <input id="settings-rename-input" style="flex:1;">
+        <button id="settings-rename-save" class="primary" style="width:auto;white-space:nowrap;">Save</button>
+      </div>
+    </div>
+
+    <label style="margin-top:16px;">Locations</label>
+    <div id="settings-locations-list"></div>
+    <button id="settings-add-location-btn" class="tab-add-btn" style="margin:6px 0 0;">+ Add location</button>
+
+    <div id="settings-archive-section" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+      <button id="settings-archive-btn" class="icon-btn archive" style="width:100%;">🗄 Archive this project</button>
+    </div>
+
+    <div class="modal-actions">
+      <button id="settings-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="archivedSettingsBackdrop">
+  <div class="modal">
+    <h3>Archived project settings</h3>
+    <div id="arch-settings-modal-sub" style="font-size:12.5px;color:var(--sub);margin:-8px 0 12px;"></div>
+    <label>Project name</label>
+    <div style="display:flex;gap:8px;">
+      <input id="arch-settings-rename-input" style="flex:1;">
+      <button id="arch-settings-rename-save" class="primary" style="width:auto;white-space:nowrap;">Save</button>
+    </div>
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+      <button id="arch-settings-delete-btn" style="width:100%;background:var(--st-broken);border-color:var(--st-broken);color:#fff;">🗑 Delete this project permanently</button>
+    </div>
+    <div class="modal-actions">
+      <button id="arch-settings-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deleteArchivedProjectConfirmBackdrop">
+  <div class="modal">
+    <h3>Delete project</h3>
+    <div id="delete-archived-project-message" style="font-size:13.5px;line-height:1.5;color:var(--ink);"></div>
+    <div class="modal-actions">
+      <button id="delete-archived-project-cancel">Cancel</button>
+      <button id="delete-archived-project-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="locationModalBackdrop">
+  <div class="modal">
+    <h3>Add location</h3>
+    <div id="loc-modal-sub" style="font-size:12.5px;color:var(--sub);margin:-8px 0 12px;"></div>
+    <label>Location name</label><input id="loc-name" placeholder="e.g. Building A">
+    <div class="modal-actions">
+      <button id="loc-cancel">Cancel</button>
+      <button id="loc-save" class="primary">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deleteLocationConfirmBackdrop">
+  <div class="modal">
+    <h3>Delete location</h3>
+    <div id="delete-location-message" style="font-size:13.5px;line-height:1.5;color:var(--ink);"></div>
+    <div class="modal-actions">
+      <button id="delete-location-cancel">Cancel</button>
+      <button id="delete-location-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="archiveConfirmBackdrop">
+  <div class="modal">
+    <h3>Archive project</h3>
+    <div id="archive-confirm-message" style="font-size:13.5px;line-height:1.5;color:var(--ink);"></div>
+    <div class="modal-actions">
+      <button id="archive-confirm-cancel">Cancel</button>
+      <button id="archive-confirm-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Archive</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deviceDetailBackdrop">
+  <div class="modal dd-modal">
+    <div class="dd-modal-head">
+      <h3 id="dd-title">Device</h3>
+      <button id="dd-close" class="dd-close-x" title="Close">✕</button>
+    </div>
+    <div id="dd-meta" class="dd-meta"></div>
+
+    <div class="dd-section-label">History</div>
+    <div id="dd-history" class="dd-list"></div>
+
+    <div class="dd-section-label">Notes</div>
+    <div id="dd-notes" class="dd-list"></div>
+    <textarea id="dd-note-input" class="dd-note-input" placeholder="Add a note, e.g. Device shipped back to Hong Kong for repairs"></textarea>
+    <div class="modal-actions">
+      <button id="dd-delete-device" style="margin-right:auto;background:var(--st-broken);border-color:var(--st-broken);color:#fff;">🗑 Delete device</button>
+      <button id="dd-add-note" class="primary">Add note</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deleteDeviceConfirmBackdrop">
+  <div class="modal">
+    <h3>Delete device</h3>
+    <div id="delete-device-message" style="font-size:13.5px;line-height:1.5;color:var(--ink);"></div>
+    <div class="modal-actions">
+      <button id="delete-device-cancel">Cancel</button>
+      <button id="delete-device-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deleteAccessoryConfirmBackdrop">
+  <div class="modal">
+    <h3>Delete accessory</h3>
+    <div id="delete-accessory-message" style="font-size:13.5px;line-height:1.5;color:var(--ink);"></div>
+    <div class="modal-actions">
+      <button id="delete-accessory-cancel">Cancel</button>
+      <button id="delete-accessory-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Delete</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const MASTER = "Master Inventory (Redmond, WA)";
+const STORE_KEY = "hw-tracker-demo-v4";
+
+// Seed data pulled from the "Device Returns" tab of Inventory Tracker(1).xlsx.
+// Original per-site location is ignored — everything below has been returned
+// and is treated as back at the Redmond, WA master inventory.
+const SEED_DEVICES = [
+{"tag":"DC0AD7","model":"Lenovo Idea Pad Pro","serial":"HNQ04WDE","status":"instock","id":"1"},
+{"tag":"DC0AKR","model":"Lenovo Idea Pad Pro","serial":"HNQ03HY0","status":"instock","id":"2"},
+{"tag":"DC0ALA","model":"Ambi-Mic","serial":"801-1195","status":"instock","id":"3"},
+{"tag":"DC0AAW","model":"Ambi-Mic","serial":"801-1044","status":"instock","id":"4"},
+{"tag":"SN-1YHJH2","model":"MacBook","serial":"GLF91YHJH2","status":"instock","id":"5"},
+{"tag":"DC0AKS","model":"Insta 360 X5","serial":"IAHEA2507TFDSK","status":"instock","id":"6"},
+{"tag":"DC0AKT","model":"Insta 360 X5","serial":"IAHEA25096T587","status":"instock","id":"7"},
+{"tag":"DC0AKU","model":"Insta 360 X5","serial":"IAHYA2507PM6TH","status":"instock","id":"8"},
+{"tag":"DC0AKV","model":"Insta 360 X5","serial":"IAHYA2506A9M57","status":"instock","id":"9"},
+{"tag":"DC0AK3","model":"Insta 360 X5","serial":"IAHEA250965SXH","status":"instock","id":"10"},
+{"tag":"DC0AKW","model":"Ambi-Mic","serial":"1001","status":"instock","id":"11"},
+{"tag":"DC0AKX","model":"Ambi-Mic","serial":"801-1224","status":"broken","id":"12"},
+{"tag":"DC0AKY","model":"Ambi-Mic","serial":"801-1230","status":"instock","id":"13"},
+{"tag":"DC0AKZ","model":"Ambi-Mic","serial":"801-1232","status":"instock","id":"14"},
+{"tag":"DC0AK1","model":"Ambi-Mic","serial":"801-1221","status":"instock","id":"15"},
+{"tag":"DC0AK0","model":"Ambi-Mic","serial":"801-1260","status":"instock","id":"16"},
+{"tag":"DC0AK2","model":"Ambi-Mic","serial":"801-1223","status":"broken","id":"17"},
+{"tag":"DC0AA8","model":"Lenovo Idea Pad Pro","serial":"HNQ04WVK","status":"instock","id":"18"},
+{"tag":"DC0AF2","model":"Lenovo Idea Pad Pro","serial":"HNQ03DHQ","status":"instock","id":"19"},
+{"tag":"DC0AF3","model":"Lenovo Idea Pad Pro","serial":"HNQ03HDM","status":"instock","id":"20"},
+{"tag":"DC0AFZ","model":"Lenovo Idea Pad Pro","serial":"HNQ03HZK","status":"instock","id":"21"},
+{"tag":"DC0AA5","model":"Lenovo Idea Pad Pro","serial":"HNQ04WV7","status":"broken","id":"22"},
+{"tag":"DC0AA4","model":"Lenovo Idea Pad Pro","serial":"HNQ04X4P","status":"instock","id":"23"},
+{"tag":"DC0AF4","model":"Lenovo Idea Pad Pro","serial":"HNQ03J1D","status":"instock","id":"24"},
+{"tag":"DC0AF5","model":"Lenovo Idea Pad Pro","serial":"HNQ03J00","status":"instock","id":"25"},
+{"tag":"DC0AFY","model":"Lenovo Idea Pad Pro","serial":"HNQ03DR3","status":"instock","id":"26"},
+{"tag":"SN-1KNDJX","model":"Lenovo ThinkPad","serial":"1s20NB005RUSPF1KNDJX","status":"instock","id":"27"},
+{"tag":"DC0AAA","model":"MacBook","serial":"K704MK2QKV","status":"instock","id":"28"},
+{"tag":"DC0AK4","model":"MacBook","serial":"GH74JQ0Y00","status":"instock","id":"29"},
+{"tag":"DC0AK5","model":"MacBook","serial":"JYQDKVW2MQ","status":"instock","id":"30"},
+{"tag":"DC0AK6","model":"MacBook","serial":"HVKR932MD9","status":"instock","id":"31"},
+{"tag":"DC0AK7","model":"MacBook","serial":"LQ21DHY2NN","status":"instock","id":"32"},
+{"tag":"DC0AK9","model":"MacBook","serial":"GCXJXLHG9W","status":"instock","id":"33"},
+{"tag":"DC0AK8","model":"MacBook","serial":"G0X7RY50CR","status":"instock","id":"34"},
+{"tag":"DC0AN4","model":"8 TB SSD","serial":"2538K8A003BD","status":"instock","id":"35"},
+{"tag":"DC0AN5","model":"8 TB SSD","serial":"2533K8A002F0","status":"instock","id":"36"},
+{"tag":"DC0AN6","model":"8 TB SSD","serial":"2537K8A0073D","status":"instock","id":"37"},
+{"tag":"DC0AN7","model":"8 TB SSD","serial":"2528K8A00021","status":"instock","id":"38"},
+{"tag":"DC0AN8","model":"8 TB SSD","serial":"2526K8A001F8","status":"instock","id":"39"},
+{"tag":"DC0AN9","model":"8 TB SSD","serial":"2538K8A0038E","status":"instock","id":"40"},
+{"tag":"DC0AOA","model":"8 TB SSD","serial":"2537K8A006A3","status":"instock","id":"41"},
+{"tag":"DC0AOB","model":"8 TB SSD","serial":"2537K8A006D7","status":"instock","id":"42"},
+{"tag":"DC0AOC","model":"8 TB SSD","serial":"2538K8A002D4","status":"instock","id":"43"},
+{"tag":"DC0AOD","model":"8 TB SSD","serial":"2526K8A00276","status":"instock","id":"44"},
+{"tag":"DC0AA6","model":"Lenovo Idea Pad Pro","serial":"HNQ04RG2","status":"instock","id":"45"},
+{"tag":"DC0ALB","model":"MacBook","serial":"FQH96CF6L2","status":"instock","id":"46"},
+{"tag":"DC0ALE","model":"MacBook","serial":"MWDW3Q5L2R","status":"instock","id":"47"},
+{"tag":"DC0ALF","model":"MacBook","serial":"KWKP4PVD2R","status":"instock","id":"48"},
+{"tag":"DC0AMX","model":"MacBook","serial":"MJ7L64QW7J","status":"instock","id":"49"},
+{"tag":"SN-1-1207","model":"Ambi-Mic","serial":"801-1207","status":"instock","id":"50"},
+{"tag":"SN-1-1209","model":"Ambi-Mic","serial":"801-1209","status":"broken","id":"51"},
+{"tag":"DC0ALG","model":"Ambi-Mic","serial":"801-1229","status":"instock","id":"52"},
+{"tag":"SN-1-1242","model":"Ambi-Mic","serial":"801-1242","status":"broken","id":"53"},
+{"tag":"DC0ALN","model":"Ambi-Mic","serial":"801-1254","status":"instock","id":"54"},
+{"tag":"DC0ALO","model":"Ambi-Mic","serial":"801-1228","status":"broken","id":"55"},
+{"tag":"DC0ALD","model":"Insta 360 X5","serial":"IAHYA25106A938","status":"instock","id":"56"},
+{"tag":"SN-9BGPGS","model":"Insta 360 X5","serial":"IAHEA2509BGPGS","status":"instock","id":"57"},
+{"tag":"DC0ALI","model":"Insta 360 X5","serial":"IAHEA25097S578","status":"instock","id":"58"},
+{"tag":"DC0ALH","model":"Insta 360 X5","serial":"IAHEA2505YDV74","status":"instock","id":"59"},
+{"tag":"DC0AMS","model":"Insta 360 X5","serial":"IAHYA2506TY9RG","status":"instock","id":"60"},
+{"tag":"DC0AMS-2","model":"Insta 360 X5","serial":"IAHYA2507H56YP","status":"instock","id":"61"},
+{"tag":"DC0AOE","model":"Insta 360 X5","serial":"IAHYA2506V3HK8","status":"instock","id":"62"},
+{"tag":"DC0AA7","model":"Lenovo Idea Pad Pro","serial":"HNQ04REP","status":"instock","id":"63"},
+{"tag":"DC0AF0","model":"Lenovo Idea Pad Pro","serial":"HNQ03HWU","status":"instock","id":"64"},
+{"tag":"DC0AF1","model":"Lenovo Idea Pad Pro","serial":"HNQ03E24","status":"instock","id":"65"},
+{"tag":"DC0ALJ","model":"8 TB SSD","serial":"2526K8A0022F","status":"instock","id":"66"},
+{"tag":"DC0ALK","model":"8 TB SSD","serial":"2538K8A0022B","status":"instock","id":"67"},
+{"tag":"DC0ALM","model":"8 TB SSD","serial":"2537K8A0052E","status":"instock","id":"68"},
+{"tag":"DC0ALL","model":"8 TB SSD","serial":"2529K8A00377","status":"instock","id":"69"},
+{"tag":"SN-A00301","model":"8 TB SSD","serial":"2526K8A00301","status":"instock","id":"70"},
+{"tag":"DC0AMU","model":"8 TB SSD","serial":"2526K8A007B1","status":"instock","id":"71"},
+{"tag":"DC0AMV","model":"8 TB SSD","serial":"2526K8A0070B","status":"instock","id":"72"},
+{"tag":"DC0AMW","model":"8 TB SSD","serial":"2538K8A0022D","status":"instock","id":"73"},
+{"tag":"DC0AA2","model":"Lenovo Idea Pad Pro","serial":"HNQ04RGM","status":"instock","id":"74"},
+{"tag":"DC0AD6","model":"Lenovo Idea Pad Pro","serial":"HNQ04WDB","status":"instock","id":"75"},
+{"tag":"DC0AA3","model":"Lenovo Idea Pad Pro","serial":"HNQ04X4U","status":"instock","id":"76"},
+{"tag":"DC0ALS","model":"MacBook","serial":"DX9K9L7R41","status":"instock","id":"77"},
+{"tag":"DC0ALR","model":"MacBook","serial":"L2KK4VD7GX","status":"instock","id":"78"},
+{"tag":"DC0ALQ","model":"MacBook","serial":"J9R3319XMM","status":"instock","id":"79"},
+{"tag":"DC0ANE","model":"Insta 360 X5","serial":"IAHYA2507D9EJY","status":"instock","id":"80"},
+{"tag":"DC0ANF","model":"Insta 360 X5","serial":"IAHYA2507588S6","status":"instock","id":"81"},
+{"tag":"DC0ANG","model":"Insta 360 X5","serial":"IAHYA2507DXVET","status":"instock","id":"82"},
+{"tag":"DC0ANI","model":"Ambi-Mic","serial":"801-1191","status":"instock","id":"83"},
+{"tag":"DC0ANJ","model":"Ambi-Mic","serial":"801-1205","status":"instock","id":"84"},
+{"tag":"DC0ANH","model":"Ambi-Mic","serial":"801-1241","status":"broken","id":"85"},
+{"tag":"DC0ALT","model":"MacBook","serial":"LYG2TNPH4P","status":"instock","id":"86"},
+{"tag":"DC0ALU","model":"MacBook","serial":"C9063YK6Q2","status":"instock","id":"87"},
+{"tag":"DC0ALV","model":"MacBook","serial":"D63RY5YWK1","status":"instock","id":"88"},
+{"tag":"DC0ALW","model":"Ambi-Mic","serial":"801-1236","status":"instock","id":"89"},
+{"tag":"DC0ALX","model":"Ambi-Mic","serial":"801-1257","status":"instock","id":"90"},
+{"tag":"DC0ALY","model":"Ambi-Mic","serial":"801-1237","status":"instock","id":"91"},
+{"tag":"DC0AL0","model":"Insta 360 X5","serial":"IAHEA250887X8F","status":"instock","id":"92"},
+{"tag":"DC0ALZ","model":"Insta 360 X5","serial":"IAHYA2507R6FFA","status":"instock","id":"93"},
+{"tag":"DC0AL1","model":"8 TB SSD","serial":"2538K8A00174","status":"instock","id":"94"},
+{"tag":"DC0AL2","model":"8 TB SSD","serial":"2538K8A00284","status":"instock","id":"95"},
+{"tag":"DC0AL4","model":"Lenovo Idea Pad Pro","serial":"HNQ01PM9","status":"instock","id":"96"},
+{"tag":"DC0AL5","model":"Lenovo Idea Pad Pro","serial":"HNQ01PPA","status":"instock","id":"97"},
+{"tag":"DC0AL6","model":"Lenovo Idea Pad Pro","serial":"HNQ01PMQ","status":"instock","id":"98"},
+{"tag":"DC0AL3","model":"Lenovo Idea Pad Pro","serial":"HNQ01PM0","status":"instock","id":"99"},
+{"tag":"DC0AL7","model":"Ambi-Mic","serial":"801-1208","status":"instock","id":"100"},
+{"tag":"DC0AL8","model":"Ambi-Mic","serial":"801-1231","status":"instock","id":"101"},
+{"tag":"DC0AL9","model":"Ambi-Mic","serial":"801-1220","status":"instock","id":"102"},
+{"tag":"DC0AMC","model":"Insta 360 X5","serial":"IAHEA250965KTA","status":"instock","id":"103"},
+{"tag":"DC0AMB","model":"Insta 360 X5","serial":"IAHYA2507P6CNV","status":"instock","id":"104"},
+{"tag":"DC0AMA","model":"Insta 360 X5","serial":"IAHEA25095GYKD","status":"instock","id":"105"},
+{"tag":"DC0AMD","model":"Insta 360 X5","serial":"IAHEA25097NEA3","status":"instock","id":"106"},
+{"tag":"DC0AME","model":"Insta 360 X5","serial":"IAHYA2508ERKHQ","status":"instock","id":"107"},
+{"tag":"DC0AMF","model":"Insta 360 X5","serial":"IAHYA2508YVQG4","status":"instock","id":"108"},
+{"tag":"DC0AMG","model":"8 TB SSD","serial":"2538K8A00389","status":"instock","id":"109"},
+{"tag":"DC0AMH","model":"8 TB SSD","serial":"2538K8A0038F","status":"instock","id":"110"},
+{"tag":"DC0AMI","model":"8 TB SSD","serial":"2538K8A00234","status":"instock","id":"111"},
+{"tag":"DC0AF6","model":"Lenovo Idea Pad Pro","serial":"HNQ03DMG","status":"instock","id":"112"},
+{"tag":"DC0AMK","model":"Lenovo Idea Pad Pro","serial":"HNQ01PPE","status":"instock","id":"113"},
+{"tag":"DC0AMN","model":"Lenovo Idea Pad Pro","serial":"HNQ01PPJ","status":"instock","id":"114"},
+{"tag":"DC0AMJ","model":"Lenovo Idea Pad Pro","serial":"HNQ01PCC","status":"instock","id":"115"},
+{"tag":"PE035625","model":"Lenovo Idea Pad Pro","serial":"HNQ01PPK","status":"instock","id":"116"},
+{"tag":"DC0AD2","model":"Lenovo Idea Pad Pro","serial":"HNQ03HYU","status":"instock","id":"117"},
+{"tag":"DC0AD3","model":"Lenovo Idea Pad Pro","serial":"HNQ03DUQ","status":"instock","id":"118"},
+{"tag":"DC0AMM","model":"Lenovo Idea Pad Pro","serial":"HNQ01PHC","status":"instock","id":"119"},
+{"tag":"DC0AMO","model":"Lenovo Idea Pad Pro","serial":"HNQ01P31","status":"instock","id":"120"},
+{"tag":"DC0AMP","model":"MacBook","serial":"FKX0V6GH4F","status":"instock","id":"121"},
+{"tag":"DC0AMQ","model":"MacBook","serial":"MK2C4C4KP","status":"instock","id":"122"},
+{"tag":"DC0AMR","model":"MacBook","serial":"KJ772YHWD4","status":"instock","id":"123"},
+{"tag":"DC0AMY","model":"8 TB SSD","serial":"2538K8A00287","status":"instock","id":"124"},
+{"tag":"DC0AMZ","model":"8 TB SSD","serial":"2538K8A002D7","status":"instock","id":"125"},
+{"tag":"DC0AM0","model":"8 TB SSD","serial":"2538K8A00306","status":"instock","id":"126"},
+{"tag":"DC0AM1","model":"8 TB SSD","serial":"2538K8A0038A","status":"instock","id":"127"},
+{"tag":"DC0AM7","model":"Ambi-Mic","serial":"801-1194","status":"instock","id":"128"},
+{"tag":"DC0AM8","model":"Ambi-Mic","serial":"801-1255","status":"instock","id":"129"},
+{"tag":"DC0AM9","model":"Ambi-Mic","serial":"801-1252","status":"instock","id":"130"},
+{"tag":"DC0AAH","model":"Ambi-Mic","serial":"801-1256","status":"instock","id":"131"},
+{"tag":"DC0ANA","model":"Ambi-Mic","serial":"801*1196","status":"instock","id":"132"},
+{"tag":"DC0AM2","model":"Insta 360 X5","serial":"IAHYA25077EBGK","status":"instock","id":"133"},
+{"tag":"DC0AM3","model":"Insta 360 X5","serial":"IAHYA250769E6W","status":"instock","id":"134"},
+{"tag":"DC0AM4","model":"Insta 360 X5","serial":"IAHYA2507KHVHP","status":"instock","id":"135"},
+{"tag":"DC0AM5","model":"Insta 360 X5","serial":"IAHYA2507XA3SD","status":"instock","id":"136"},
+{"tag":"DC0AM6","model":"Insta 360 X5","serial":"IAHYA2507H6T73","status":"instock","id":"137"},
+{"tag":"DC0ANB","model":"MacBook","serial":"H73XDANYPP","status":"instock","id":"138"},
+{"tag":"DC0ANC","model":"MacBook","serial":"C02G93W8ML7H","status":"instock","id":"139"},
+{"tag":"DC0AND","model":"MacBook","serial":"LC9X4X7VDY","status":"instock","id":"140"},
+{"tag":"DC0AD5","model":"Lenovo Idea Pad Pro","serial":"HNQ04WDK","status":"instock","id":"141"},
+{"tag":"DC0ABC","model":"Lenovo Idea Pad Pro","serial":"HNQ04X4A","status":"instock","id":"142"},
+{"tag":"DC0AAY","model":"Lenovo Idea Pad Pro","serial":"HNQ04WVA","status":"instock","id":"143"},
+{"tag":"DC0AD4","model":"Lenovo Idea Pad Pro","serial":"HNQ03J1V","status":"instock","id":"144"},
+{"tag":"DC0AAX","model":"Lenovo Idea Pad Pro","serial":"HNQ04X4N","status":"instock","id":"145"},
+{"tag":"DC0AAZ","model":"Lenovo Idea Pad Pro","serial":"HNQ04WYK","status":"instock","id":"146"},
+{"tag":"DC0ANK","model":"8 TB SSD","serial":"2538K8A003D2","status":"instock","id":"147"},
+{"tag":"DC0ANL","model":"8 TB SSD","serial":"2537K8A005F9","status":"instock","id":"148"},
+{"tag":"DC0ANM","model":"8 TB SSD","serial":"2526K8A00050","status":"instock","id":"149"},
+{"tag":"DC0ANN","model":"8 TB SSD","serial":"2538K8A00157","status":"instock","id":"150"},
+{"tag":"DC0ANO","model":"8 TB SSD","serial":"2526K8A0061F","status":"instock","id":"151"},
+{"tag":"DC0ANP","model":"8 TB SSD","serial":"2526K8A001E2","status":"instock","id":"152"},
+{"tag":"DC0ANQ","model":"Insta 360 X5","serial":"IAHYA2508FFGEK","status":"instock","id":"153"},
+{"tag":"DC0ANR","model":"Insta 360 X5","serial":"IAHEA2507SUDJ4","status":"instock","id":"154"},
+{"tag":"DC0ANS","model":"Insta 360 X5","serial":"IAHEA25096S9N8","status":"instock","id":"155"},
+{"tag":"DC0ANT","model":"Insta 360 X5","serial":"IAHEA2508JSX69","status":"instock","id":"156"},
+{"tag":"DC0ANU","model":"Insta 360 X5","serial":"IAHEA25095GJC3","status":"instock","id":"157"},
+{"tag":"DC0ANV","model":"Ambi-Mic","serial":"801-1192","status":"instock","id":"158"},
+{"tag":"DC0ANW","model":"Ambi-Mic","serial":"801-1261","status":"instock","id":"159"},
+{"tag":"DC0ANX","model":"Ambi-Mic","serial":"801-1259","status":"instock","id":"160"},
+{"tag":"DC0ANY","model":"Ambi-Mic","serial":"801-1225","status":"instock","id":"161"},
+{"tag":"DC0ANZ","model":"Ambi-Mic","serial":"801-1233","status":"instock","id":"162"},
+{"tag":"DC0AFX","model":"Lenovo Idea Pad Pro","serial":"HNQ03DK5","status":"instock","id":"163"},
+{"tag":"DC0AD8","model":"Lenovo Idea Pad Pro","serial":"HNQ03E0T","status":"instock","id":"164"},
+{"tag":"DC0ABA","model":"Lenovo Idea Pad Pro","serial":"HNQ04GQ8","status":"instock","id":"165"},
+{"tag":"DC0AA0","model":"Lenovo Idea Pad Pro","serial":"HNQ04RGN","status":"instock","id":"166"},
+{"tag":"DC0AAD","model":"MacBook","serial":"J9GMV9RP22","status":"instock","id":"167"},
+{"tag":"DC0AAE","model":"MacBook","serial":"M79QGYNJP9","status":"instock","id":"168"},
+{"tag":"DC0AFW","model":"MacBook","serial":"KNYF09HV9W","status":"instock","id":"169"},
+{"tag":"DC0AN2","model":"MacBook","serial":"M2QX9557VG","status":"instock","id":"170"},
+{"tag":"BC0AN0","model":"MacBook","serial":"L6RM64C3RR","status":"instock","id":"171"},
+{"tag":"DC0AN1","model":"MacBook","serial":"H2WP46HQXH","status":"instock","id":"172"},
+{"tag":"DC0AN3","model":"MacBook","serial":"MPK9YGXT0J","status":"instock","id":"173"},
+{"tag":"DC0AOH","model":"8 TB SSD","serial":"2538K8A0020B","status":"instock","id":"174"},
+{"tag":"DC0AOF","model":"8 TB SSD","serial":"2528K8A0000F","status":"instock","id":"175"},
+{"tag":"DC0AOG","model":"8 TB SSD","serial":"2538K8A00376","status":"instock","id":"176"},
+{"tag":"DC0AOI","model":"Insta 360 X5","serial":"IAHYA2507EVRFR","status":"instock","id":"177"}
+];
+
+function seed(){
+  return {
+    buckets: [MASTER, "Project Alpha", "Project Beta"],
+    devices: SEED_DEVICES.map(d => ({ ...d, bucket: MASTER, notes: [], location: "" })),
+    log: [],
+    featured: MASTER,
+    archived: [],
+    minimized: [],
+    archivedCollapsed: false,
+    locations: { [MASTER]: [], "Project Alpha": [], "Project Beta": [] },
+    accessories: [],
+    accTab: {},
+    modelTags: {}
+  };
+}
+
+function normalizeState(){
+  if (!state.featured || !state.buckets.includes(state.featured)) state.featured = MASTER;
+  if (!state.archived) state.archived = [];
+  if (!state.minimized) state.minimized = [];
+  if (typeof state.archivedCollapsed !== "boolean") state.archivedCollapsed = false;
+  if (!state.log) state.log = [];
+  if (!state.locations) state.locations = {};
+  state.buckets.forEach(b => {
+    if (!state.locations[b]) state.locations[b] = [];
+  });
+  state.devices.forEach(d => {
+    if (!d.notes) d.notes = [];
+    if (typeof d.location !== "string") d.location = "";
+  });
+  if (!state.accessories) state.accessories = [];
+  if (!state.accTab) state.accTab = {};
+  // Locations are now shared between the Hardware and Accessories tabs of a
+  // project. Migrate anything from the older, separate per-tab accessory
+  // location list (if this browser still has one saved) into the shared list.
+  if (state.accLocations){
+    state.buckets.forEach(b => {
+      const extra = state.accLocations[b] || [];
+      extra.forEach(name => {
+        if (!state.locations[b].includes(name)) state.locations[b].push(name);
+      });
+    });
+    delete state.accLocations;
+  }
+  state.buckets.forEach(b => {
+    if (!state.accTab[b]) state.accTab[b] = "hardware";
+  });
+  state.accessories.forEach(a => {
+    if (typeof a.tag !== "string") a.tag = "";
+    if (typeof a.serial !== "string") a.serial = "";
+    if (typeof a.location !== "string") a.location = "";
+    if (!a.status) a.status = "instock";
+    if (typeof a.bucket !== "string" || !state.buckets.includes(a.bucket)) a.bucket = MASTER;
+  });
+  if (state.summaryTab !== "hardware" && state.summaryTab !== "accessories") state.summaryTab = "hardware";
+  if (!state.modelTags) state.modelTags = {};
+}
+
+let state = JSON.parse(localStorage.getItem(STORE_KEY) || "null") || seed();
+normalizeState();
+
+function save(){
+  if (state.log.length > 200) state.log.length = 200;
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+}
+function logActivity(entry){ state.log.unshift(entry); }
+
+function statusLabel(s){ return s === "instock" ? "In stock" : s === "inuse" ? "In use" : "Broken"; }
+
+function matchesQuery(d, q){
+  if (!q) return true;
+  const tags = (state.modelTags[d.model] || []).join(" ");
+  return [d.tag, d.model, d.serial, tags].join(" ").toLowerCase().includes(q);
+}
+
+// Distinct model names already in use, for the Model-field autocomplete
+// dropdowns on the Add Device / Add Accessory modals.
+function existingHardwareModels(){
+  return [...new Set(state.devices.map(d => d.model).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+function existingAccessoryModels(){
+  return [...new Set(state.accessories.map(a => a.model).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+// Wires a text input to a suggestion dropdown that filters as you type,
+// matching anywhere in the string (not just the start), and fills the input
+// on click. Used for the Model fields so people reuse existing model names
+// instead of accidentally creating near-duplicates (e.g. "Surface Laptop 6"
+// vs "surface laptop6").
+function setupModelAutocomplete(inputEl, dropdownEl, getModels){
+  function showSuggestions(){
+    const q = inputEl.value.trim().toLowerCase();
+    const models = getModels();
+    const filtered = (q ? models.filter(m => m.toLowerCase().includes(q)) : models).slice(0, 8);
+    if (filtered.length === 0){ dropdownEl.classList.remove("open"); dropdownEl.innerHTML = ""; return; }
+    dropdownEl.innerHTML = filtered.map(m => `<div class="item" data-model="${m}">${m}</div>`).join("");
+    dropdownEl.classList.add("open");
+  }
+  inputEl.addEventListener("input", showSuggestions);
+  inputEl.addEventListener("focus", showSuggestions);
+  dropdownEl.addEventListener("click", (e) => {
+    const item = e.target.closest(".item");
+    if (!item) return;
+    inputEl.value = item.getAttribute("data-model");
+    dropdownEl.classList.remove("open");
+  });
+  document.addEventListener("click", (e) => {
+    if (!inputEl.contains(e.target) && !dropdownEl.contains(e.target)) dropdownEl.classList.remove("open");
+  });
+}
+
+function destOptions(currentBucket){
+  return state.buckets.map(b => `<option value="${b}" ${b===currentBucket?"selected":""}>${b}</option>`).join("");
+}
+
+function locOptions(locs, current){
+  return `<option value="" ${!current ? "selected" : ""}>Unassigned</option>` +
+    locs.map(l => `<option value="${l}" ${current===l?"selected":""}>${l}</option>`).join("");
+}
+
+// --- Column sorting (click Serial / Tag / Model / Status headers) ---
+let sortField = null; // 'serial' | 'tag' | 'model' | 'status'
+let sortDir = "asc";
+
+function setSort(field){
+  if (sortField === field){ sortDir = sortDir === "asc" ? "desc" : "asc"; }
+  else { sortField = field; sortDir = "asc"; }
+  render();
+}
+
+function sortDevices(list){
+  if (!sortField) return list;
+  const copy = [...list];
+  copy.sort((a, b) => {
+    const av = sortField === "status" ? statusLabel(a.status) : (a[sortField] || "");
+    const bv = sortField === "status" ? statusLabel(b.status) : (b[sortField] || "");
+    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+  return copy;
+}
+
+function sortLabel(field, text){
+  const active = sortField === field;
+  const arrow = active ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+  return `<span class="sortable-col" data-field="${field}">${text}${arrow}</span>`;
+}
+
+function wireSortHeaders(container){
+  container.querySelectorAll(".sortable-col[data-field]").forEach(el => {
+    el.addEventListener("click", () => setSort(el.getAttribute("data-field")));
+  });
+}
+
+// --- Accessories get their own independent sort state, so clicking a
+// column header there doesn't also resort the hardware tables. ---
+let accSortField = null;
+let accSortDir = "asc";
+
+function accSetSort(field){
+  if (accSortField === field){ accSortDir = accSortDir === "asc" ? "desc" : "asc"; }
+  else { accSortField = field; accSortDir = "asc"; }
+  render();
+}
+
+function sortAccessories(list){
+  if (!accSortField) return list;
+  const copy = [...list];
+  copy.sort((a, b) => {
+    const av = accSortField === "status" ? statusLabel(a.status) : (a[accSortField] || "");
+    const bv = accSortField === "status" ? statusLabel(b.status) : (b[accSortField] || "");
+    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+    return accSortDir === "asc" ? cmp : -cmp;
+  });
+  return copy;
+}
+
+function accSortLabel(field, text){
+  const active = accSortField === field;
+  const arrow = active ? (accSortDir === "asc" ? " ▲" : " ▼") : "";
+  return `<span class="sortable-col" data-accfield="${field}">${text}${arrow}</span>`;
+}
+
+function wireAccSortHeaders(container){
+  container.querySelectorAll(".sortable-col[data-accfield]").forEach(el => {
+    el.addEventListener("click", () => accSetSort(el.getAttribute("data-accfield")));
+  });
+}
+
+const emptyHint = `<div class="empty-hint">No devices here</div>`;
+
+// compact=true drops the Model column (used in the small sidebar panels).
+// locs is the list of declared locations for this device's bucket — pass a
+// non-empty array to add a Location column (used for projects, not Master).
+function rowHTML(d, compact, locs){
+  const hasLocs = !!(locs && locs.length);
+  const sizeClass = (compact ? "compact" : "full") + (hasLocs ? " loc" : "");
+  const modelCell = compact ? "" : `<span class="cell sub" title="${d.model}">${d.model}</span>`;
+  const locCell = hasLocs ? `<select class="loc-select" data-id="${d.id}">${locOptions(locs, d.location)}</select>` : "";
+  return `
+    <div class="row ${sizeClass}" draggable="true" data-id="${d.id}">
+      <span class="handle">⋮⋮</span>
+      <span class="cell serial dd-open" data-id="${d.id}" title="View history &amp; notes for ${d.serial}">${d.serial}</span>
+      <span class="cell tag" title="${d.tag}">${d.tag}${d.notes && d.notes.length ? `<span class="note-badge">📝${d.notes.length}</span>` : ""}</span>
+      ${modelCell}
+      <select class="status-select ${d.status}" data-id="${d.id}">
+        <option value="instock" ${d.status==="instock"?"selected":""}>In stock</option>
+        <option value="inuse" ${d.status==="inuse"?"selected":""}>In use</option>
+        <option value="broken" ${d.status==="broken"?"selected":""}>Broken</option>
+      </select>
+      ${locCell}
+    </div>
+  `;
+}
+
+function wireRows(container){
+  container.querySelectorAll(".row").forEach(row => {
+    const id = row.getAttribute("data-id");
+    row.addEventListener("dragstart", e => {
+      e.stopPropagation(); // don't let this bubble up into a mini-card's card-reorder drag
+      e.dataTransfer.setData("text/plain", id);
+    });
+  });
+  container.querySelectorAll(".status-select").forEach(sel => {
+    sel.addEventListener("change", e => updateStatus(e.target.getAttribute("data-id"), e.target.value));
+  });
+  container.querySelectorAll(".loc-select").forEach(sel => {
+    sel.addEventListener("change", e => updateLocation(e.target.getAttribute("data-id"), e.target.value));
+  });
+  container.querySelectorAll(".dd-open").forEach(el => {
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      openDeviceDetail(el.getAttribute("data-id"));
+    });
+  });
+}
+
+function wireDropZone(el, bucket, kind){
+  const dtype = kind === "accessory" ? "application/x-accessory" : "text/plain";
+  el.addEventListener("dragover", e => {
+    if (!e.dataTransfer.types.includes(dtype)) return;
+    e.preventDefault();
+    el.classList.add("dragover");
+  });
+  el.addEventListener("dragleave", () => el.classList.remove("dragover"));
+  el.addEventListener("drop", e => {
+    if (!e.dataTransfer.types.includes(dtype)) return;
+    e.preventDefault();
+    el.classList.remove("dragover");
+    const id = e.dataTransfer.getData(dtype);
+    if (kind === "accessory") moveAccessory(id, bucket);
+    else dropInto(id, bucket);
+  });
+}
+
+// Keeps the green drop boxes hidden until a row is actually being dragged,
+// then reveals the matching kind of drop box everywhere at once (hardware
+// boxes for a device drag, accessory boxes for an accessory drag). Uses the
+// capture phase so it still fires even though row dragstart calls stopPropagation().
+document.addEventListener("dragstart", e => {
+  const row = e.target.closest && e.target.closest(".row");
+  if (!row) return;
+  if (row.classList.contains("acc")) document.body.classList.add("dragging-accessory");
+  else document.body.classList.add("dragging-device");
+}, true);
+document.addEventListener("dragend", () => {
+  document.body.classList.remove("dragging-device", "dragging-accessory");
+}, true);
+
+function wirePinButtons(container){
+  container.querySelectorAll(".pin-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.featured = btn.getAttribute("data-bucket");
+      save();
+      render();
+    });
+  });
+}
+
+function wireHeadButtons(container){
+  container.querySelectorAll(".minimize-btn").forEach(btn => {
+    btn.addEventListener("click", () => toggleMinimize(btn.getAttribute("data-bucket")));
+  });
+  container.querySelectorAll(".settings-btn").forEach(btn => {
+    btn.addEventListener("click", () => openProjectSettings(btn.getAttribute("data-bucket")));
+  });
+}
+
+// Switches a panel between its Hardware and Accessories tab, and wires the
+// "+ Accessory" button that only shows up while the Accessories tab is active.
+function wireTabButtons(container){
+  container.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const bucket = btn.getAttribute("data-bucket");
+      const tab = btn.getAttribute("data-tab");
+      state.accTab[bucket] = tab;
+      save();
+      render();
+    });
+  });
+  container.querySelectorAll(".tab-add-btn").forEach(btn => {
+    btn.addEventListener("click", () => openAddAccessoryModal(btn.getAttribute("data-bucket")));
+  });
+}
+
+function toggleMinimize(bucket){
+  const idx = state.minimized.indexOf(bucket);
+  if (idx >= 0) state.minimized.splice(idx, 1);
+  else state.minimized.push(bucket);
+  save();
+  render();
+}
+
+// Lets sidebar mini-cards be dragged to reorder the sidebar. Uses a distinct
+// dataTransfer type so it never collides with dragging a device row.
+function wireCardDrag(container){
+  container.querySelectorAll(".mini-card").forEach(card => {
+    const bucket = card.getAttribute("data-bucket");
+    card.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("application/x-bucket-order", bucket);
+      e.dataTransfer.effectAllowed = "move";
+    });
+    card.addEventListener("dragover", e => {
+      if (!e.dataTransfer.types.includes("application/x-bucket-order")) return;
+      e.preventDefault();
+      card.classList.add("card-dragover");
+    });
+    card.addEventListener("dragleave", () => card.classList.remove("card-dragover"));
+    card.addEventListener("drop", e => {
+      if (!e.dataTransfer.types.includes("application/x-bucket-order")) return;
+      e.preventDefault();
+      card.classList.remove("card-dragover");
+      const draggedBucket = e.dataTransfer.getData("application/x-bucket-order");
+      reorderBucket(draggedBucket, bucket);
+    });
+  });
+}
+
+function reorderBucket(draggedBucket, targetBucket){
+  if (draggedBucket === targetBucket) return;
+  const fromIdx = state.buckets.indexOf(draggedBucket);
+  if (fromIdx === -1) return;
+  state.buckets.splice(fromIdx, 1);
+  const toIdx = state.buckets.indexOf(targetBucket);
+  if (toIdx === -1){ state.buckets.push(draggedBucket); } else { state.buckets.splice(toIdx, 0, draggedBucket); }
+  save();
+  render();
+}
+
+// Renders a bucket's devices as a flat row list.
+function renderBucketRows(containerEl, bucket, devices, compact){
+  const locs = state.locations[bucket] || [];
+
+  if (locs.length === 0){
+    containerEl.innerHTML = devices.length ? devices.map(d => rowHTML(d, compact, [])).join("") : emptyHint;
+    wireRows(containerEl);
+    return;
+  }
+
+  // Group devices under their declared location, plus a catch-all
+  // "Unassigned" group for anything with no (or a since-deleted) location.
+  const known = new Set(locs);
+  const groups = locs.map(name => ({ name, devices: devices.filter(d => d.location === name), isUnassigned: false }));
+  groups.push({ name: "Unassigned", devices: devices.filter(d => !known.has(d.location)), isUnassigned: true });
+
+  containerEl.innerHTML = groups.map(g => `
+    <div class="loc-group">
+      <div class="loc-group-head">
+        <span>${g.name} <span class="loc-count">(${g.devices.length})</span></span>
+        ${g.isUnassigned ? "" : `<button class="loc-del-btn" data-bucket="${bucket}" data-loc="${g.name}" title="Delete location">✕ Remove</button>`}
+      </div>
+      ${g.devices.length ? g.devices.map(d => rowHTML(d, compact, locs)).join("") : `<div class="empty-hint small">No devices here</div>`}
+    </div>
+  `).join("");
+  wireRows(containerEl);
+  containerEl.querySelectorAll(".loc-del-btn").forEach(btn => {
+    btn.addEventListener("click", () => openDeleteLocationConfirm(btn.getAttribute("data-bucket"), btn.getAttribute("data-loc")));
+  });
+}
+
+// Wires the dedicated dashed drop-target box(es) inside a container to accept
+// device drops for the bucket named in their data-bucket attribute. Dropping
+// hardware is intentionally limited to this box (rather than anywhere in the
+// row list) to cut down on accidental moves.
+function wireDropTarget(container){
+  container.querySelectorAll(".drop-target").forEach(el => {
+    const kind = el.getAttribute("data-kind") || "hardware";
+    wireDropZone(el, el.getAttribute("data-bucket"), kind);
+  });
+}
+
+// --- Accessories: lower-priority items (tripods, lux meters, etc). They live
+// inside whichever project (or Master) they're assigned to, behind their own
+// Accessories tab. Draggable into the green accessory drop box to move
+// between projects. Tag and Serial are optional since these often won't have one.
+function accRowHTML(a, compact, locs){
+  const modelCell = compact ? "" : `<span class="cell sub" title="${a.model}">${a.model}</span>`;
+  return `
+    <div class="row acc ${compact ? "compact" : "full"}" draggable="true" data-id="${a.id}">
+      <span class="handle">⋮⋮</span>
+      <span class="cell serial" title="${a.serial || "No serial recorded"}">${a.serial || "—"}</span>
+      <span class="cell tag" title="${a.tag || "No tag"}">${a.tag || "—"}</span>
+      ${modelCell}
+      <select class="status-select ${a.status}" data-id="${a.id}">
+        <option value="instock" ${a.status==="instock"?"selected":""}>In stock</option>
+        <option value="inuse" ${a.status==="inuse"?"selected":""}>In use</option>
+        <option value="broken" ${a.status==="broken"?"selected":""}>Broken</option>
+      </select>
+      <select class="acc-loc-select" data-id="${a.id}">${locOptions(locs || [], a.location)}</select>
+      <button class="acc-del-btn" data-id="${a.id}" title="Delete accessory">🗑</button>
+    </div>
+  `;
+}
+
+function wireAccRows(container){
+  container.querySelectorAll(".row.acc").forEach(row => {
+    const id = row.getAttribute("data-id");
+    row.addEventListener("dragstart", e => {
+      e.stopPropagation(); // don't let this bubble up into a mini-card's card-reorder drag
+      e.dataTransfer.setData("application/x-accessory", id);
+    });
+  });
+  container.querySelectorAll(".status-select").forEach(sel => {
+    sel.addEventListener("change", e => updateAccessoryStatus(e.target.getAttribute("data-id"), e.target.value));
+  });
+  container.querySelectorAll(".acc-loc-select").forEach(sel => {
+    sel.addEventListener("change", e => updateAccessoryLocation(e.target.getAttribute("data-id"), e.target.value));
+  });
+  container.querySelectorAll(".acc-del-btn").forEach(btn => {
+    btn.addEventListener("click", () => openDeleteAccessoryConfirm(btn.getAttribute("data-id")));
+  });
+}
+
+function updateAccessoryStatus(id, newStatus){
+  const a = state.accessories.find(x => x.id === id);
+  if (!a || a.status === newStatus) return;
+  a.status = newStatus;
+  save();
+  render();
+}
+
+function updateAccessoryLocation(id, newLoc){
+  const a = state.accessories.find(x => x.id === id);
+  if (!a || a.location === newLoc) return;
+  a.location = newLoc;
+  save();
+  render();
+}
+
+function moveAccessory(id, bucket){
+  const a = state.accessories.find(x => x.id === id);
+  if (!a || a.bucket === bucket) return;
+  a.bucket = bucket;
+  a.location = ""; // locations are specific to the previous project, so reset to Unassigned
+  save();
+  render();
+}
+
+let deleteAccessoryId = null;
+function openDeleteAccessoryConfirm(id){
+  const a = state.accessories.find(x => x.id === id);
+  if (!a) return;
+  deleteAccessoryId = id;
+  document.getElementById("delete-accessory-message").innerHTML =
+    `Delete <b>${a.model}</b>${a.tag ? ` (${a.tag})` : ""}? This can't be undone.`;
+  document.getElementById("deleteAccessoryConfirmBackdrop").classList.add("open");
+}
+
+function renderAccessoryRows(containerEl, accessories, locs, compact, bucket){
+  if (!locs.length){
+    containerEl.innerHTML = accessories.length
+      ? accessories.map(a => accRowHTML(a, compact, locs)).join("")
+      : `<div class="empty-hint">No accessories here yet — click + Accessory to add one.</div>`;
+    wireAccRows(containerEl);
+    return;
+  }
+
+  const known = new Set(locs);
+  const groups = locs.map(name => ({ name, list: accessories.filter(a => a.location === name), isUnassigned: false }));
+  groups.push({ name: "Unassigned", list: accessories.filter(a => !known.has(a.location)), isUnassigned: true });
+
+  containerEl.innerHTML = groups.map(g => `
+    <div class="loc-group">
+      <div class="loc-group-head">
+        <span>${g.name} <span class="loc-count">(${g.list.length})</span></span>
+        ${g.isUnassigned ? "" : `<button class="loc-del-btn" data-loc="${g.name}" title="Delete location">✕ Remove</button>`}
+      </div>
+      ${g.list.length ? g.list.map(a => accRowHTML(a, compact, locs)).join("") : `<div class="empty-hint small">No accessories here</div>`}
+    </div>
+  `).join("");
+  wireAccRows(containerEl);
+  containerEl.querySelectorAll(".loc-del-btn").forEach(btn => {
+    btn.addEventListener("click", () => openDeleteLocationConfirm(bucket, btn.getAttribute("data-loc")));
+  });
+}
+
+function render(){
+  const q = document.getElementById("search").value.trim().toLowerCase();
+
+  if (!state.buckets.includes(state.featured)) state.featured = MASTER;
+  const mainBucket = state.featured;
+  const mainIsMaster = mainBucket === MASTER;
+  const sidebarBuckets = state.buckets.filter(b => b !== mainBucket);
+
+  // Main (pinned / featured) panel — always the big one on the left
+  const mainEl = document.getElementById("main-panel");
+  const mainDevices = sortDevices(state.devices.filter(d => d.bucket === mainBucket && matchesQuery(d, q)));
+  const mainAccessories = sortAccessories(state.accessories.filter(a => a.bucket === mainBucket && matchesQuery(a, q)));
+  // Hardware location grouping stays project-only (Master never groups its hardware).
+  // Locations themselves are shared per bucket across both tabs, so Master's
+  // Accessories tab can still have its own locations without affecting Master's Hardware tab.
+  const mainHasLocs = !mainIsMaster && (state.locations[mainBucket] || []).length > 0;
+  const mainAccLocs = state.locations[mainBucket] || [];
+  const mainTab = state.accTab[mainBucket] || "hardware";
+  mainEl.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <div class="tag">${mainIsMaster ? "Master · Redmond, WA" : "Project · Pinned"}</div>
+        <h2>${mainBucket}</h2>
+      </div>
+      <div class="head-actions">
+        <button class="icon-btn settings-btn" data-bucket="${mainBucket}" title="Project settings">⚙</button>
+        ${mainIsMaster ? "" : `<button class="pin-btn unpin" data-bucket="${MASTER}">↩ Return Master to main</button>`}
+        <span class="count-pill">${mainTab === "accessories" ? mainAccessories.length : mainDevices.length}</span>
+      </div>
+    </div>
+    <div class="panel-tabs">
+      <button class="tab-btn ${mainTab==="hardware"?"active":""}" data-bucket="${mainBucket}" data-tab="hardware">🖥 Hardware <span class="tab-count">${mainDevices.length}</span></button>
+      <button class="tab-btn ${mainTab==="accessories"?"active":""}" data-bucket="${mainBucket}" data-tab="accessories">🎒 Accessories <span class="tab-count">${mainAccessories.length}</span></button>
+      ${mainTab === "accessories" ? `<button class="tab-add-btn" data-bucket="${mainBucket}">+ Accessory</button>` : ""}
+    </div>
+    ${mainTab === "hardware" ? `
+      <div class="drop-target" data-bucket="${mainBucket}" data-kind="hardware">⬇ Drop hardware here to move into ${mainBucket}</div>
+      <div class="col-labels full${mainHasLocs ? " loc" : ""}"><span></span>${sortLabel("serial","Serial")}${sortLabel("tag","Tag")}${sortLabel("model","Model")}${sortLabel("status","Status")}${mainHasLocs ? "<span>Location</span>" : ""}</div>
+      <div class="rows-list" id="main-rows"></div>
+    ` : `
+      <div class="drop-target" data-bucket="${mainBucket}" data-kind="accessory">⬇ Drop an accessory here to move into ${mainBucket}</div>
+      <div class="col-labels acc full"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Location</span><span></span></div>
+      <div class="rows-list" id="main-acc-rows"></div>
+    `}
+  `;
+  if (mainTab === "hardware"){
+    renderBucketRows(document.getElementById("main-rows"), mainBucket, mainDevices, false);
+  } else {
+    renderAccessoryRows(document.getElementById("main-acc-rows"), mainAccessories, mainAccLocs, false, mainBucket);
+  }
+  wirePinButtons(mainEl);
+  wireHeadButtons(mainEl);
+  wireSortHeaders(mainEl);
+  wireAccSortHeaders(mainEl);
+  wireTabButtons(mainEl);
+
+  // Sidebar — archived projects header first, then everything not currently pinned to main
+  const sidebarEl = document.getElementById("sidebar-panel");
+  sidebarEl.innerHTML = archivedSectionHTML() + sidebarBuckets.map(b => {
+    const isMaster = b === MASTER;
+    const isMin = state.minimized.includes(b);
+    const tab = state.accTab[b] || "hardware";
+    const count = state.devices.filter(d => d.bucket === b && matchesQuery(d, q)).length;
+    const accCount = state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)).length;
+    // Hardware location grouping stays project-only; locations are shared per bucket across tabs.
+    const bHasLocs = !isMaster && (state.locations[b] || []).length > 0;
+    return `
+      <div class="mini-card${isMin ? " minimized" : ""}" data-bucket="${b}" draggable="true">
+        <div class="panel-head">
+          <div>
+            <div class="tag"><span class="card-handle" title="Drag to reorder">⠿</span>${isMaster ? "Master · Redmond, WA" : "Project"}</div>
+            <h2>${b}</h2>
+          </div>
+          <div class="head-actions">
+            <button class="icon-btn minimize-btn" data-bucket="${b}" title="${isMin ? "Expand" : "Minimize"}">${isMin ? "▸" : "▾"}</button>
+            <button class="icon-btn settings-btn" data-bucket="${b}" title="Project settings">⚙</button>
+            <button class="pin-btn" data-bucket="${b}">📌 Pin to main</button>
+            <span class="count-pill">${tab === "accessories" ? accCount : count}</span>
+          </div>
+        </div>
+        <div class="panel-tabs">
+          <button class="tab-btn ${tab==="hardware"?"active":""}" data-bucket="${b}" data-tab="hardware">🖥 <span class="tab-count">${count}</span></button>
+          <button class="tab-btn ${tab==="accessories"?"active":""}" data-bucket="${b}" data-tab="accessories">🎒 <span class="tab-count">${accCount}</span></button>
+          ${tab === "accessories" ? `<button class="tab-add-btn" data-bucket="${b}">+</button>` : ""}
+        </div>
+        ${tab === "hardware" ? `
+          <div class="drop-target" data-bucket="${b}" data-kind="hardware">⬇ Drop hardware here</div>
+          <div class="col-labels compact${bHasLocs ? " loc" : ""}"><span></span>${sortLabel("serial","Serial")}${sortLabel("tag","Tag")}${sortLabel("status","Status")}${bHasLocs ? "<span>Location</span>" : ""}</div>
+          <div class="rows-list" data-bucket="${b}"></div>
+        ` : `
+          <div class="drop-target" data-bucket="${b}" data-kind="accessory">⬇ Drop an accessory here</div>
+          <div class="col-labels acc compact"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("status","Status")}<span>Loc</span><span></span></div>
+          <div class="rows-list" data-bucket="${b}"></div>
+        `}
+      </div>
+    `;
+  }).join("");
+
+  sidebarBuckets.forEach(b => {
+    const container = sidebarEl.querySelector(`.rows-list[data-bucket="${CSS.escape(b)}"]`);
+    if (!container) return;
+    const tab = state.accTab[b] || "hardware";
+    if (tab === "hardware"){
+      const devices = sortDevices(state.devices.filter(d => d.bucket === b && matchesQuery(d, q)));
+      renderBucketRows(container, b, devices, true);
+    } else {
+      const accessories = sortAccessories(state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)));
+      renderAccessoryRows(container, accessories, state.locations[b] || [], true, b);
+    }
+  });
+  wirePinButtons(sidebarEl);
+  wireHeadButtons(sidebarEl);
+  wireCardDrag(sidebarEl);
+  wireSortHeaders(sidebarEl);
+  wireAccSortHeaders(sidebarEl);
+  wireTabButtons(sidebarEl);
+  sidebarEl.querySelectorAll(".restore-btn").forEach(btn => {
+    btn.addEventListener("click", () => restoreProject(btn.getAttribute("data-name")));
+  });
+  sidebarEl.querySelectorAll(".settings-btn-archived").forEach(btn => {
+    btn.addEventListener("click", () => openArchivedSettings(btn.getAttribute("data-name")));
+  });
+  const archivedToggle = document.getElementById("archivedToggle");
+  if (archivedToggle) archivedToggle.addEventListener("click", () => {
+    state.archivedCollapsed = !state.archivedCollapsed;
+    save();
+    render();
+  });
+  wireDropTarget(mainEl);
+  wireDropTarget(sidebarEl);
+
+  renderLog();
+  qmRefreshDest();
+  renderModelSummary();
+}
+
+function archivedSectionHTML(){
+  if (state.archived.length === 0) return "";
+  const collapsed = state.archivedCollapsed;
+  return `
+    <div class="archived-panel${collapsed ? " collapsed" : ""}">
+      <div class="archived-panel-head" id="archivedToggle">
+        <span>Archived Projects (${state.archived.length})</span>
+        <span class="archived-toggle">${collapsed ? "▸" : "▾"}</span>
+      </div>
+      ${state.archived.map(a => `
+        <div class="archived-item">
+          <div><b>${a.name}</b><div class="meta">Archived ${a.archivedAt}</div></div>
+          <div class="archived-item-actions">
+            <button class="icon-btn settings-btn-archived" data-name="${a.name}" title="Project settings">⚙</button>
+            <button class="restore-btn" data-name="${a.name}">↩ Restore</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderModelSummary(){
+  document.querySelectorAll("#summary-tabs .tab-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.getAttribute("data-summary-tab") === state.summaryTab);
+  });
+  document.getElementById("hw-model-table-wrap").style.display = state.summaryTab === "hardware" ? "" : "none";
+  document.getElementById("acc-model-table-wrap").style.display = state.summaryTab === "accessories" ? "" : "none";
+
+  renderHardwareModelTable();
+  renderAccessoryModelTable();
+}
+
+function renderHardwareModelTable(){
+  const body = document.getElementById("model-table-body");
+  const foot = document.getElementById("model-table-foot");
+
+  // Count devices currently sitting in Master Inventory, grouped by model.
+  const counts = {};
+  state.devices.filter(d => d.bucket === MASTER).forEach(d => {
+    if (!counts[d.model]) counts[d.model] = { total: 0, instock: 0, inuse: 0, broken: 0 };
+    counts[d.model].total++;
+    counts[d.model][d.status]++;
+  });
+
+  const models = Object.keys(counts).sort((a,b) => counts[b].total - counts[a].total);
+
+  if (models.length === 0){
+    body.innerHTML = `<tr><td colspan="5" class="empty-hint">No devices currently in Master Inventory.</td></tr>`;
+    foot.innerHTML = "";
+    return;
+  }
+
+  body.innerHTML = models.map(m => {
+    const c = counts[m];
+    return `
+      <tr class="model-row-click" data-model="${m}" data-kind="hardware" title="Click for a project breakdown and tags">
+        <td>${m}</td>
+        <td class="num">${c.total}</td>
+        <td class="num status-num instock">${c.instock}</td>
+        <td class="num status-num inuse">${c.inuse}</td>
+        <td class="num status-num broken">${c.broken}</td>
+      </tr>
+    `;
+  }).join("");
+  body.querySelectorAll(".model-row-click").forEach(tr => {
+    tr.addEventListener("click", () => openModelDetail(tr.getAttribute("data-kind"), tr.getAttribute("data-model")));
+  });
+
+  const totals = models.reduce((acc, m) => {
+    const c = counts[m];
+    acc.total += c.total; acc.instock += c.instock; acc.inuse += c.inuse; acc.broken += c.broken;
+    return acc;
+  }, { total:0, instock:0, inuse:0, broken:0 });
+
+  foot.innerHTML = `
+    <tr>
+      <td>Total</td>
+      <td class="num">${totals.total}</td>
+      <td class="num status-num instock">${totals.instock}</td>
+      <td class="num status-num inuse">${totals.inuse}</td>
+      <td class="num status-num broken">${totals.broken}</td>
+    </tr>
+  `;
+}
+
+// Accessory availability, broken out by model + project + location (since,
+// unlike hardware, accessories are spread across every project rather than
+// just Master, location and project are the useful breakdown here).
+function renderAccessoryModelTable(){
+  const body = document.getElementById("acc-model-table-body");
+  const foot = document.getElementById("acc-model-table-foot");
+
+  const counts = {};
+  state.accessories.forEach(a => {
+    const key = `${a.model} ${a.bucket} ${a.location || "Unassigned"}`;
+    if (!counts[key]) counts[key] = { model: a.model, bucket: a.bucket, location: a.location || "Unassigned", qty: 0 };
+    counts[key].qty++;
+  });
+
+  const rows = Object.values(counts).sort((x, y) =>
+    x.model.localeCompare(y.model, undefined, { sensitivity: "base" }) ||
+    x.bucket.localeCompare(y.bucket, undefined, { sensitivity: "base" }) ||
+    x.location.localeCompare(y.location, undefined, { sensitivity: "base" })
+  );
+
+  if (rows.length === 0){
+    body.innerHTML = `<tr><td colspan="4" class="empty-hint">No accessories added yet.</td></tr>`;
+    foot.innerHTML = "";
+    return;
+  }
+
+  body.innerHTML = rows.map(r => `
+    <tr class="model-row-click" data-model="${r.model}" data-kind="accessory" title="Click for a project breakdown and tags">
+      <td>${r.model}</td>
+      <td>${r.bucket}</td>
+      <td>${r.location}</td>
+      <td class="num">${r.qty}</td>
+    </tr>
+  `).join("");
+  body.querySelectorAll(".model-row-click").forEach(tr => {
+    tr.addEventListener("click", () => openModelDetail(tr.getAttribute("data-kind"), tr.getAttribute("data-model")));
+  });
+
+  const total = rows.reduce((sum, r) => sum + r.qty, 0);
+  foot.innerHTML = `
+    <tr>
+      <td colspan="3">Total</td>
+      <td class="num">${total}</td>
+    </tr>
+  `;
+}
+
+// --- Model detail modal: project/location breakdown + custom name tags ---
+// Opened by clicking a model row in Availability by Model. Tags entered here
+// are stored per-model and get picked up by the top search bar via matchesQuery().
+let modelDetailTarget = null; // { kind: "hardware"|"accessory", model: "..." }
+const modelDetailModal = document.getElementById("modelDetailBackdrop");
+
+function openModelDetail(kind, model){
+  modelDetailTarget = { kind, model };
+  document.getElementById("md-title").textContent = model;
+  document.getElementById("md-subtitle").textContent = kind === "hardware" ? "Hardware model" : "Accessory model";
+
+  const items = kind === "hardware"
+    ? state.devices.filter(d => d.model === model)
+    : state.accessories.filter(a => a.model === model);
+
+  // Simple per-project breakdown: how many of this model sit in each bucket
+  // (Master Inventory included), rather than a row-by-row item table.
+  const counts = {};
+  items.forEach(it => { counts[it.bucket] = (counts[it.bucket] || 0) + 1; });
+  const bucketNames = Object.keys(counts).sort((a, b) => {
+    if (a === MASTER) return -1;
+    if (b === MASTER) return 1;
+    return a.localeCompare(b, undefined, { sensitivity: "base" });
+  });
+
+  const listEl = document.getElementById("md-breakdown-list");
+  if (bucketNames.length === 0){
+    listEl.innerHTML = `<div class="empty-hint small">No items of this model found.</div>`;
+  } else {
+    listEl.innerHTML = bucketNames.map(b => `
+      <div class="md-breakdown-row">
+        <span class="proj">${b}${b === MASTER ? `<span class="master-tag">(Master)</span>` : ""}</span>
+        <span class="qty">${counts[b]}</span>
+      </div>
+    `).join("");
+  }
+  document.getElementById("md-count").textContent = `${items.length} total across all projects`;
+
+  renderModelTagChips();
+  document.getElementById("md-tag-input").value = "";
+  modelDetailModal.classList.add("open");
+}
+
+function renderModelTagChips(){
+  if (!modelDetailTarget) return;
+  const tags = state.modelTags[modelDetailTarget.model] || [];
+  const wrap = document.getElementById("md-tag-chips");
+  if (tags.length === 0){
+    wrap.innerHTML = `<div class="empty-hint small">No tags yet.</div>`;
+    return;
+  }
+  wrap.innerHTML = tags.map(t => `
+    <span class="model-tag">${t}<button class="md-tag-del" data-tag="${t}" title="Remove tag">✕</button></span>
+  `).join("");
+  wrap.querySelectorAll(".md-tag-del").forEach(btn => {
+    btn.addEventListener("click", () => removeModelTag(modelDetailTarget.model, btn.getAttribute("data-tag")));
+  });
+}
+
+function addModelTag(model, text){
+  const tag = text.trim();
+  if (!tag) return;
+  const list = state.modelTags[model] || (state.modelTags[model] = []);
+  if (list.some(t => t.toLowerCase() === tag.toLowerCase())) return;
+  list.push(tag);
+  save();
+  renderModelTagChips();
+  renderModelSummary();
+}
+
+function removeModelTag(model, tag){
+  const list = state.modelTags[model];
+  if (!list) return;
+  state.modelTags[model] = list.filter(t => t !== tag);
+  if (state.modelTags[model].length === 0) delete state.modelTags[model];
+  save();
+  renderModelTagChips();
+  renderModelSummary();
+}
+
+document.getElementById("md-add-tag-btn").addEventListener("click", () => {
+  if (!modelDetailTarget) return;
+  addModelTag(modelDetailTarget.model, document.getElementById("md-tag-input").value);
+  document.getElementById("md-tag-input").value = "";
+  document.getElementById("md-tag-input").focus();
+});
+document.getElementById("md-tag-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter"){
+    e.preventDefault();
+    document.getElementById("md-add-tag-btn").click();
+  }
+});
+document.getElementById("md-close").addEventListener("click", () => modelDetailModal.classList.remove("open"));
+
+// Moves a device to a different bucket. Used by drag-drop, the dest dropdown,
+// and quick-move-by-serial.
+function dropInto(id, bucket){
+  const d = state.devices.find(x => x.id === id);
+  if (!d || d.bucket === bucket) return;
+  const from = d.bucket;
+  d.bucket = bucket;
+  d.location = ""; // location is specific to the previous project, so reset to Unassigned
+  logActivity({ ts: new Date().toLocaleString(), type: "move", tag: d.serial, deviceId: d.id, from, to: bucket });
+  save();
+  render();
+}
+
+function updateStatus(id, newStatus){
+  const d = state.devices.find(x => x.id === id);
+  if (!d || d.status === newStatus) return;
+  const from = d.status;
+  d.status = newStatus;
+  logActivity({ ts: new Date().toLocaleString(), type: "status", tag: d.serial, deviceId: d.id, from: statusLabel(from), to: statusLabel(newStatus) });
+  save();
+  render();
+}
+
+function updateLocation(id, newLoc){
+  const d = state.devices.find(x => x.id === id);
+  if (!d || d.location === newLoc) return;
+  const from = d.location || "Unassigned";
+  d.location = newLoc;
+  logActivity({ ts: new Date().toLocaleString(), type: "location", tag: d.serial, deviceId: d.id, from, to: newLoc || "Unassigned" });
+  save();
+  render();
+}
+
+// --- Device detail: history + notes ---
+let deviceDetailId = null;
+
+function openDeviceDetail(id){
+  deviceDetailId = id;
+  const d = state.devices.find(x => x.id === id);
+  if (!d) return;
+
+  document.getElementById("dd-title").textContent = `${d.tag} — ${d.model}`;
+  document.getElementById("dd-meta").innerHTML = `
+    Serial: <b>${d.serial}</b><br>
+    Status: <span class="dd-status-chip status-select ${d.status}">${statusLabel(d.status)}</span><br>
+    Currently in: <b>${d.bucket}</b>
+  `;
+
+  const history = state.log.filter(e => e.deviceId === id);
+  const histEl = document.getElementById("dd-history");
+  histEl.innerHTML = history.length ? history.map(e => {
+    let text;
+    if (e.type === "status") text = `Status changed from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "location") text = `Location changed from ${e.from} to <b>${e.to}</b>`;
+    else text = `Moved from ${e.from} to <b>${e.to}</b>`;
+    return `<div class="log-entry">${text}<br>${e.ts}</div>`;
+  }).join("") : `<div class="log-entry">No tracked history yet.</div>`;
+
+  renderNotesList(d);
+  document.getElementById("dd-note-input").value = "";
+  document.getElementById("deviceDetailBackdrop").classList.add("open");
+}
+
+function renderNotesList(d){
+  const notesEl = document.getElementById("dd-notes");
+  if (!d.notes || d.notes.length === 0){
+    notesEl.innerHTML = `<div class="log-entry">No notes yet.</div>`;
+    return;
+  }
+  notesEl.innerHTML = d.notes.map((n, i) => `
+    <div class="dd-note-item">
+      <span class="txt">${n.text}</span>
+      <span class="date">${n.ts}</span>
+      <button class="dd-note-del" data-idx="${i}" title="Delete note">✕</button>
+    </div>
+  `).join("");
+  notesEl.querySelectorAll(".dd-note-del").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const idx = parseInt(btn.getAttribute("data-idx"), 10);
+      d.notes.splice(idx, 1);
+      save();
+      renderNotesList(d);
+      render();
+    });
+  });
+}
+
+// Opens the on-theme confirmation modal for archiving. If the project still has
+// devices in it, it shows a blocking message instead of the archive action.
+let archiveTargetBucket = null;
+function openArchiveConfirm(bucket){
+  const devCount = state.devices.filter(d => d.bucket === bucket).length;
+  const accCount = state.accessories.filter(a => a.bucket === bucket).length;
+  const count = devCount + accCount;
+  archiveTargetBucket = bucket;
+  const msgEl = document.getElementById("archive-confirm-message");
+  const okBtn = document.getElementById("archive-confirm-ok");
+  const cancelBtn = document.getElementById("archive-confirm-cancel");
+
+  if (count > 0){
+    const parts = [];
+    if (devCount) parts.push(`${devCount} device${devCount===1?"":"s"}`);
+    if (accCount) parts.push(`${accCount} accessor${accCount===1?"y":"ies"}`);
+    msgEl.innerHTML = `Move everything out of <b>${bucket}</b> before it can be archived.<br><br>${parts.join(" and ")} still assigned there.`;
+    okBtn.style.display = "none";
+    cancelBtn.textContent = "OK";
+  } else {
+    msgEl.innerHTML = `Archive <b>${bucket}</b>? It will move to the Archived Projects list and can be restored anytime.`;
+    okBtn.style.display = "";
+    cancelBtn.textContent = "Cancel";
+  }
+  document.getElementById("archiveConfirmBackdrop").classList.add("open");
+}
+
+function doArchive(bucket){
+  state.buckets = state.buckets.filter(b => b !== bucket);
+  state.archived.push({ name: bucket, archivedAt: new Date().toLocaleString() });
+  if (state.featured === bucket) state.featured = MASTER;
+  logActivity({ ts: new Date().toLocaleString(), type: "archive", tag: bucket, from: "Active", to: "Archived" });
+  save();
+  render();
+}
+
+function restoreProject(name){
+  const rec = state.archived.find(a => a.name === name);
+  if (!rec) return;
+  if (state.buckets.includes(name)){ alert("A project with that name already exists."); return; }
+  state.buckets.push(name);
+  if (!state.locations[name]) state.locations[name] = [];
+  state.archived = state.archived.filter(a => a.name !== name);
+  logActivity({ ts: new Date().toLocaleString(), type: "archive", tag: name, from: "Archived", to: "Active" });
+  save();
+  render();
+}
+
+function renderLog(){
+  const el = document.getElementById("logList");
+  if (state.log.length === 0){
+    el.innerHTML = `<div class="log-entry">No activity yet.</div>`;
+    return;
+  }
+  el.innerHTML = state.log.slice(0,60).map(e => {
+    let text;
+    if (e.type === "status") text = `<b>${e.tag}</b> status changed from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "location") text = `<b>${e.tag}</b> location changed from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "location-delete") text = `Location <b>${e.from}</b> deleted from <b>${e.tag}</b>` + (e.to > 0 ? ` (${e.to} device${e.to===1?"":"s"} moved to Unassigned)` : "");
+    else if (e.type === "archive") text = e.to === "Archived" ? `<b>${e.tag}</b> project was archived` : `<b>${e.tag}</b> project was restored`;
+    else if (e.type === "delete") text = `<b>${e.tag}</b> was deleted from ${e.from}`;
+    else if (e.type === "rename") text = `Project <b>${e.from}</b> renamed to <b>${e.to}</b>`;
+    else if (e.type === "delete-project") text = `Archived project <b>${e.tag}</b> was permanently deleted`;
+    else text = `<b>${e.tag}</b> moved from ${e.from} → <b>${e.to}</b>`;
+    return `<div class="log-entry">${text}<br>${e.ts}</div>`;
+  }).join("");
+}
+
+// Search
+document.getElementById("search").addEventListener("input", render);
+
+// Availability-by-model tab toggle (Hardware vs Accessories). The buttons
+// live in static HTML, so they're wired once here rather than re-wired on
+// every render() — renderModelSummary() just toggles their "active" class.
+document.querySelectorAll("#summary-tabs .tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    state.summaryTab = btn.getAttribute("data-summary-tab");
+    save();
+    render();
+  });
+});
+
+// Add asset chooser — the single "+ Asset" header button opens this first,
+// then routes to whichever modal (Device or Accessory) matches the pick.
+const assetChooserModal = document.getElementById("assetChooserBackdrop");
+document.getElementById("addAssetBtn").onclick = () => assetChooserModal.classList.add("open");
+document.getElementById("chooser-cancel").onclick = () => assetChooserModal.classList.remove("open");
+document.getElementById("chooser-device-btn").onclick = () => {
+  assetChooserModal.classList.remove("open");
+  openAddDeviceModal();
+};
+document.getElementById("chooser-accessory-btn").onclick = () => {
+  assetChooserModal.classList.remove("open");
+  openAddAccessoryModal(state.featured);
+};
+
+// Add device modal
+const deviceModal = document.getElementById("deviceModalBackdrop");
+function openAddDeviceModal(){
+  document.getElementById("d-bucket").innerHTML = destOptions(MASTER);
+  deviceModal.classList.add("open");
+}
+document.getElementById("d-cancel").onclick = () => deviceModal.classList.remove("open");
+document.getElementById("d-save").onclick = () => {
+  const tag = document.getElementById("d-tag").value.trim();
+  const model = document.getElementById("d-model").value.trim();
+  const serial = document.getElementById("d-serial").value.trim();
+  const status = document.getElementById("d-status").value;
+  const bucket = document.getElementById("d-bucket").value;
+  if (!model){ alert("Model is required."); return; }
+  state.devices.push({ id: Date.now().toString(), tag: tag || "—", model, serial: serial || "—", status, bucket, notes: [] });
+  save(); render();
+  deviceModal.classList.remove("open");
+  ["d-tag","d-model","d-serial"].forEach(id => document.getElementById(id).value = "");
+};
+setupModelAutocomplete(document.getElementById("d-model"), document.getElementById("d-model-suggest"), existingHardwareModels);
+
+// Add project modal
+const projectModal = document.getElementById("projectModalBackdrop");
+document.getElementById("addProjectBtn").onclick = () => projectModal.classList.add("open");
+document.getElementById("p-cancel").onclick = () => projectModal.classList.remove("open");
+document.getElementById("p-save").onclick = () => {
+  const name = document.getElementById("p-name").value.trim();
+  if (!name){ return; }
+  if (state.buckets.includes(name)){ alert("That project already exists."); return; }
+  state.buckets.push(name);
+  state.locations[name] = [];
+  save(); render();
+  projectModal.classList.remove("open");
+  document.getElementById("p-name").value = "";
+};
+
+// Add location modal
+let locationTargetBucket = null;
+const locationModal = document.getElementById("locationModalBackdrop");
+function openAddLocationModal(bucket){
+  locationTargetBucket = bucket;
+  document.getElementById("loc-modal-sub").innerHTML = `Adding a location to <b>${bucket}</b>.`;
+  document.getElementById("loc-name").value = "";
+  locationModal.classList.add("open");
+}
+document.getElementById("loc-cancel").onclick = () => locationModal.classList.remove("open");
+document.getElementById("loc-save").onclick = () => {
+  const name = document.getElementById("loc-name").value.trim();
+  if (!name || !locationTargetBucket) return;
+  const list = state.locations[locationTargetBucket] || (state.locations[locationTargetBucket] = []);
+  if (list.includes(name)){ alert("That location already exists for this project."); return; }
+  list.push(name);
+  save(); render();
+  locationModal.classList.remove("open");
+  refreshSettingsLocationsIfOpen();
+};
+
+// Delete location confirmation modal
+let deleteLocationTarget = null;
+const deleteLocationModal = document.getElementById("deleteLocationConfirmBackdrop");
+function openDeleteLocationConfirm(bucket, name){
+  deleteLocationTarget = { bucket, name };
+  const devCount = state.devices.filter(d => d.bucket === bucket && d.location === name).length;
+  const accCount = state.accessories.filter(a => a.bucket === bucket && a.location === name).length;
+  const parts = [];
+  if (devCount) parts.push(`${devCount} device${devCount===1?"":"s"}`);
+  if (accCount) parts.push(`${accCount} accessor${accCount===1?"y":"ies"}`);
+  document.getElementById("delete-location-message").innerHTML =
+    `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from both the Hardware and Accessories tabs.` +
+    (parts.length ? `<br><br>${parts.join(" and ")} there will move back to Unassigned.` : "");
+  deleteLocationModal.classList.add("open");
+}
+document.getElementById("delete-location-cancel").onclick = () => deleteLocationModal.classList.remove("open");
+document.getElementById("delete-location-ok").onclick = () => {
+  if (!deleteLocationTarget) return;
+  const { bucket, name } = deleteLocationTarget;
+  const list = state.locations[bucket] || [];
+  state.locations[bucket] = list.filter(l => l !== name);
+  let movedCount = 0;
+  state.devices.forEach(d => {
+    if (d.bucket === bucket && d.location === name){ d.location = ""; movedCount++; }
+  });
+  state.accessories.forEach(a => {
+    if (a.bucket === bucket && a.location === name){ a.location = ""; movedCount++; }
+  });
+  logActivity({ ts: new Date().toLocaleString(), type: "location-delete", tag: bucket, from: name, to: movedCount });
+  save(); render();
+  deleteLocationModal.classList.remove("open");
+  refreshSettingsLocationsIfOpen();
+};
+
+// Project settings modal — consolidates Rename, Archive, and Locations behind
+// a single gear icon so each project's header doesn't need a row of buttons.
+let settingsTargetBucket = null;
+const projectSettingsModal = document.getElementById("projectSettingsBackdrop");
+
+function openProjectSettings(bucket){
+  settingsTargetBucket = bucket;
+  const isMaster = bucket === MASTER;
+  document.getElementById("settings-modal-sub").innerHTML = `<b>${bucket}</b>`;
+  document.getElementById("settings-rename-section").style.display = isMaster ? "none" : "";
+  document.getElementById("settings-archive-section").style.display = isMaster ? "none" : "";
+  document.getElementById("settings-rename-input").value = bucket;
+  renderSettingsLocationsList();
+  projectSettingsModal.classList.add("open");
+}
+
+function renderSettingsLocationsList(){
+  const bucket = settingsTargetBucket;
+  const list = state.locations[bucket] || [];
+  const el = document.getElementById("settings-locations-list");
+  el.innerHTML = list.length
+    ? list.map(name => `
+        <div class="settings-loc-row">
+          <span>${name}</span>
+          <button class="loc-del-btn" data-loc="${name}" title="Delete location">✕ Remove</button>
+        </div>
+      `).join("")
+    : `<div class="empty-hint small">No locations yet.</div>`;
+  el.querySelectorAll(".loc-del-btn").forEach(btn => {
+    btn.addEventListener("click", () => openDeleteLocationConfirm(bucket, btn.getAttribute("data-loc")));
+  });
+}
+
+// Called after adding/removing a location elsewhere, so the settings modal's
+// list stays in sync if it happens to still be open underneath.
+function refreshSettingsLocationsIfOpen(){
+  if (projectSettingsModal.classList.contains("open") && settingsTargetBucket){
+    renderSettingsLocationsList();
+  }
+}
+
+document.getElementById("settings-close").onclick = () => projectSettingsModal.classList.remove("open");
+document.getElementById("settings-add-location-btn").onclick = () => {
+  if (settingsTargetBucket) openAddLocationModal(settingsTargetBucket);
+};
+document.getElementById("settings-rename-save").onclick = () => {
+  const oldName = settingsTargetBucket;
+  if (!oldName || oldName === MASTER) return;
+  const newName = document.getElementById("settings-rename-input").value.trim();
+  if (!newName || newName === oldName) return;
+  if (state.buckets.includes(newName)){ alert("A project with that name already exists."); return; }
+  renameBucket(oldName, newName);
+  settingsTargetBucket = newName;
+  document.getElementById("settings-modal-sub").innerHTML = `<b>${newName}</b>`;
+  save();
+  render();
+};
+document.getElementById("settings-archive-btn").onclick = () => {
+  if (!settingsTargetBucket) return;
+  const bucket = settingsTargetBucket;
+  projectSettingsModal.classList.remove("open");
+  openArchiveConfirm(bucket);
+};
+
+// Renames a bucket everywhere it's used as a key: the buckets list, its
+// locations, its Hardware/Accessories tab state, minimized/featured
+// tracking, and every device/accessory currently assigned to it.
+function renameBucket(oldName, newName){
+  const idx = state.buckets.indexOf(oldName);
+  if (idx === -1) return;
+  state.buckets[idx] = newName;
+  state.locations[newName] = state.locations[oldName] || [];
+  delete state.locations[oldName];
+  state.accTab[newName] = state.accTab[oldName] || "hardware";
+  delete state.accTab[oldName];
+  const minIdx = state.minimized.indexOf(oldName);
+  if (minIdx >= 0) state.minimized[minIdx] = newName;
+  if (state.featured === oldName) state.featured = newName;
+  state.devices.forEach(d => { if (d.bucket === oldName) d.bucket = newName; });
+  state.accessories.forEach(a => { if (a.bucket === oldName) a.bucket = newName; });
+  logActivity({ ts: new Date().toLocaleString(), type: "rename", tag: newName, from: oldName, to: newName });
+}
+
+// Archived project settings — rename or permanently delete a project that's
+// already been archived. No Locations/Archive sections here since an
+// archived project has nothing currently assigned to it.
+let archivedSettingsTarget = null;
+const archivedSettingsModal = document.getElementById("archivedSettingsBackdrop");
+
+function openArchivedSettings(name){
+  archivedSettingsTarget = name;
+  document.getElementById("arch-settings-modal-sub").innerHTML = `<b>${name}</b>`;
+  document.getElementById("arch-settings-rename-input").value = name;
+  archivedSettingsModal.classList.add("open");
+}
+document.getElementById("arch-settings-close").onclick = () => archivedSettingsModal.classList.remove("open");
+document.getElementById("arch-settings-rename-save").onclick = () => {
+  const oldName = archivedSettingsTarget;
+  if (!oldName) return;
+  const newName = document.getElementById("arch-settings-rename-input").value.trim();
+  if (!newName || newName === oldName) return;
+  const conflict = state.buckets.includes(newName) || state.archived.some(a => a.name === newName);
+  if (conflict){ alert("That name is already in use."); return; }
+  renameArchivedProject(oldName, newName);
+  archivedSettingsTarget = newName;
+  document.getElementById("arch-settings-modal-sub").innerHTML = `<b>${newName}</b>`;
+  save();
+  render();
+};
+
+function renameArchivedProject(oldName, newName){
+  const rec = state.archived.find(a => a.name === oldName);
+  if (rec) rec.name = newName;
+  if (state.locations[oldName]){
+    state.locations[newName] = state.locations[oldName];
+    delete state.locations[oldName];
+  }
+  if (state.accTab[oldName]){
+    state.accTab[newName] = state.accTab[oldName];
+    delete state.accTab[oldName];
+  }
+  logActivity({ ts: new Date().toLocaleString(), type: "rename", tag: newName, from: oldName, to: newName });
+}
+
+// Delete an archived project permanently — confirm first since it can't be undone.
+const deleteArchivedProjectModal = document.getElementById("deleteArchivedProjectConfirmBackdrop");
+document.getElementById("arch-settings-delete-btn").onclick = () => {
+  if (!archivedSettingsTarget) return;
+  document.getElementById("delete-archived-project-message").innerHTML =
+    `Permanently delete <b>${archivedSettingsTarget}</b>? This can't be undone.`;
+  deleteArchivedProjectModal.classList.add("open");
+};
+document.getElementById("delete-archived-project-cancel").onclick = () => deleteArchivedProjectModal.classList.remove("open");
+document.getElementById("delete-archived-project-ok").onclick = () => {
+  if (!archivedSettingsTarget) return;
+  const name = archivedSettingsTarget;
+  state.archived = state.archived.filter(a => a.name !== name);
+  delete state.locations[name];
+  delete state.accTab[name];
+  logActivity({ ts: new Date().toLocaleString(), type: "delete-project", tag: name });
+  archivedSettingsTarget = null;
+  save();
+  deleteArchivedProjectModal.classList.remove("open");
+  archivedSettingsModal.classList.remove("open");
+  render();
+};
+
+// Add accessory modal. Can be opened from the global "+ Accessory" button
+// (defaults to whichever project is currently pinned to the main view) or
+// from a project's own Accessories tab (defaults to that project) — either
+// way the Project dropdown stays editable, same as the hardware Add Device modal.
+const accessoryModal = document.getElementById("accessoryModalBackdrop");
+function openAddAccessoryModal(bucket){
+  document.getElementById("acc-bucket").innerHTML = destOptions(bucket);
+  document.getElementById("acc-model").value = "";
+  document.getElementById("acc-tag").value = "";
+  document.getElementById("acc-serial").value = "";
+  document.getElementById("acc-status").value = "instock";
+  document.getElementById("acc-location").innerHTML = locOptions(state.locations[bucket] || [], "");
+  accessoryModal.classList.add("open");
+}
+document.getElementById("acc-bucket").addEventListener("change", e => {
+  document.getElementById("acc-location").innerHTML = locOptions(state.locations[e.target.value] || [], "");
+});
+document.getElementById("acc-cancel").onclick = () => accessoryModal.classList.remove("open");
+document.getElementById("acc-save").onclick = () => {
+  const model = document.getElementById("acc-model").value.trim();
+  const tag = document.getElementById("acc-tag").value.trim();
+  const serial = document.getElementById("acc-serial").value.trim();
+  const status = document.getElementById("acc-status").value;
+  const bucket = document.getElementById("acc-bucket").value;
+  const location = document.getElementById("acc-location").value;
+  if (!model){ alert("Model / description is required."); return; }
+  state.accessories.push({ id: "acc-" + Date.now().toString(), tag, model, serial, status, location, bucket });
+  save(); render();
+  accessoryModal.classList.remove("open");
+};
+setupModelAutocomplete(document.getElementById("acc-model"), document.getElementById("acc-model-suggest"), existingAccessoryModels);
+
+// Archive confirmation modal
+const archiveConfirmModal = document.getElementById("archiveConfirmBackdrop");
+document.getElementById("archive-confirm-cancel").onclick = () => archiveConfirmModal.classList.remove("open");
+document.getElementById("archive-confirm-ok").onclick = () => {
+  if (archiveTargetBucket) doArchive(archiveTargetBucket);
+  archiveConfirmModal.classList.remove("open");
+};
+
+// Device detail modal (history + notes)
+const deviceDetailModal = document.getElementById("deviceDetailBackdrop");
+document.getElementById("dd-close").onclick = () => deviceDetailModal.classList.remove("open");
+document.getElementById("dd-add-note").onclick = () => {
+  const input = document.getElementById("dd-note-input");
+  const text = input.value.trim();
+  if (!text || !deviceDetailId) return;
+  const d = state.devices.find(x => x.id === deviceDetailId);
+  if (!d) return;
+  if (!d.notes) d.notes = [];
+  d.notes.unshift({ ts: new Date().toLocaleDateString(), text });
+  save();
+  renderNotesList(d);
+  input.value = "";
+  render();
+};
+
+// Delete device (from inside the history/notes popup) — confirm first since it can't be undone.
+const deleteDeviceModal = document.getElementById("deleteDeviceConfirmBackdrop");
+document.getElementById("dd-delete-device").onclick = () => {
+  if (!deviceDetailId) return;
+  const d = state.devices.find(x => x.id === deviceDetailId);
+  if (!d) return;
+  document.getElementById("delete-device-message").innerHTML =
+    `Delete <b>${d.tag}</b> (S/N ${d.serial})? This can't be undone.`;
+  deleteDeviceModal.classList.add("open");
+};
+document.getElementById("delete-device-cancel").onclick = () => deleteDeviceModal.classList.remove("open");
+document.getElementById("delete-device-ok").onclick = () => {
+  if (!deviceDetailId) return;
+  const d = state.devices.find(x => x.id === deviceDetailId);
+  if (d){
+    logActivity({ ts: new Date().toLocaleString(), type: "delete", tag: d.serial, from: d.bucket, to: "" });
+    state.devices = state.devices.filter(x => x.id !== deviceDetailId);
+  }
+  save();
+  deleteDeviceModal.classList.remove("open");
+  deviceDetailModal.classList.remove("open");
+  deviceDetailId = null;
+  render();
+};
+
+// Delete accessory (quick delete right on the row) — confirm first since it can't be undone.
+const deleteAccessoryModal = document.getElementById("deleteAccessoryConfirmBackdrop");
+document.getElementById("delete-accessory-cancel").onclick = () => deleteAccessoryModal.classList.remove("open");
+document.getElementById("delete-accessory-ok").onclick = () => {
+  if (!deleteAccessoryId) return;
+  state.accessories = state.accessories.filter(x => x.id !== deleteAccessoryId);
+  deleteAccessoryId = null;
+  save();
+  deleteAccessoryModal.classList.remove("open");
+  render();
+};
+
+// Export / Import
+document.getElementById("exportBtn").onclick = () => {
+  const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "hardware-tracker-export.json";
+  a.click();
+};
+document.getElementById("importBtn").onclick = () => document.getElementById("importFile").click();
+document.getElementById("importFile").addEventListener("change", e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      if (!parsed.buckets || !parsed.devices) throw new Error("bad shape");
+      state = parsed;
+      normalizeState();
+      save(); render();
+    } catch(err){ alert("Couldn't read that file — expected a JSON export from this tool."); }
+  };
+  reader.readAsText(file);
+});
+
+// --- Quick move by serial number (supports tagging multiple devices) ---
+let qmTaggedIds = [];
+
+function qmRefreshDest(){
+  const sel = document.getElementById("qm-dest");
+  const prev = sel.value;
+  sel.innerHTML = state.buckets.map(b => `<option value="${b}">${b}</option>`).join("");
+  if (state.buckets.includes(prev)) sel.value = prev;
+}
+
+function qmRenderTags(){
+  const box = document.getElementById("qm-tags");
+  box.innerHTML = qmTaggedIds.map(id => {
+    const d = state.devices.find(x => x.id === id);
+    if (!d) return "";
+    return `<span class="qm-tag" data-id="${id}">${d.serial}<button type="button" data-id="${id}" title="Remove">✕</button></span>`;
+  }).join("");
+  box.querySelectorAll("button[data-id]").forEach(btn => {
+    btn.addEventListener("click", () => qmRemoveTag(btn.getAttribute("data-id")));
+  });
+}
+
+function qmAddTag(id){
+  if (!qmTaggedIds.includes(id)) qmTaggedIds.push(id);
+  qmRenderTags();
+  const input = document.getElementById("qm-serial");
+  input.value = "";
+  document.getElementById("qm-suggestions").classList.remove("open");
+  document.getElementById("qm-feedback").textContent = "";
+  input.focus();
+}
+
+function qmRemoveTag(id){
+  qmTaggedIds = qmTaggedIds.filter(x => x !== id);
+  qmRenderTags();
+}
+
+function qmRenderSuggestions(query){
+  const box = document.getElementById("qm-suggestions");
+  if (!query){ box.classList.remove("open"); box.innerHTML = ""; return; }
+  const q = query.trim().toLowerCase();
+  const matches = state.devices.filter(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase().includes(q)).slice(0, 8);
+  if (matches.length === 0){
+    box.innerHTML = `<div class="item">No devices match that serial number.</div>`;
+    box.classList.add("open");
+    return;
+  }
+  box.innerHTML = matches.map(d => `
+    <div class="item" data-id="${d.id}">
+      <b>${d.serial}</b> — ${d.model} (${d.tag})
+      <div class="where">Currently: ${d.bucket} · ${statusLabel(d.status)}</div>
+    </div>
+  `).join("");
+  box.classList.add("open");
+  box.querySelectorAll(".item[data-id]").forEach(el => {
+    el.addEventListener("click", () => qmAddTag(el.getAttribute("data-id")));
+  });
+}
+
+document.getElementById("qm-serial").addEventListener("input", e => {
+  document.getElementById("qm-feedback").textContent = "";
+  const val = e.target.value;
+  if (val.includes(",")){
+    // Everything before the last comma gets attempted as tags; whatever's
+    // after the last comma stays in the box for the user to keep typing.
+    const parts = val.split(",");
+    const tail = parts.pop();
+    parts.forEach(part => {
+      part = part.trim();
+      if (!part) return;
+      const match = state.devices.find(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase() === part.toLowerCase());
+      if (match) qmAddTag(match.id);
+    });
+    e.target.value = tail;
+    qmRenderSuggestions(tail);
+    return;
+  }
+  qmRenderSuggestions(val);
+});
+
+document.getElementById("qm-serial").addEventListener("keydown", e => {
+  const input = e.target;
+  if (e.key === "Enter"){
+    e.preventDefault();
+    const query = input.value.trim();
+    if (!query) return;
+    const match = state.devices.find(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase() === query.toLowerCase());
+    if (match){
+      qmAddTag(match.id);
+    } else {
+      const feedback = document.getElementById("qm-feedback");
+      feedback.textContent = `No exact match for "${query}" — pick one from the suggestions list.`;
+      feedback.className = "qm-feedback err";
+    }
+  } else if (e.key === "Backspace" && input.value === "" && qmTaggedIds.length){
+    qmRemoveTag(qmTaggedIds[qmTaggedIds.length - 1]);
+  }
+});
+
+document.getElementById("qm-move-btn").addEventListener("click", () => {
+  const feedback = document.getElementById("qm-feedback");
+  const input = document.getElementById("qm-serial");
+
+  // Give any leftover typed text (not yet turned into a tag) one last chance to match.
+  const leftover = input.value.trim();
+  if (leftover){
+    const match = state.devices.find(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase() === leftover.toLowerCase());
+    if (match) qmTaggedIds.push(match.id);
+  }
+
+  if (qmTaggedIds.length === 0){
+    feedback.textContent = "Add at least one device — pick from the suggestions, or type a full serial and press comma/Enter.";
+    feedback.className = "qm-feedback err";
+    return;
+  }
+
+  const dest = document.getElementById("qm-dest").value;
+  const devices = qmTaggedIds.map(id => state.devices.find(x => x.id === id)).filter(Boolean);
+  let movedCount = 0, alreadyCount = 0;
+  devices.forEach(d => {
+    if (d.bucket === dest) alreadyCount++; else movedCount++;
+    dropInto(d.id, dest);
+  });
+
+  feedback.textContent = devices.length === 1
+    ? (movedCount ? `Moved ${devices[0].tag} (S/N ${devices[0].serial}) to ${dest}.` : `${devices[0].tag} is already in ${dest}.`)
+    : `Moved ${movedCount} device${movedCount === 1 ? "" : "s"} to ${dest}` + (alreadyCount ? ` (${alreadyCount} already there).` : ".");
+  feedback.className = "qm-feedback ok";
+
+  qmTaggedIds = [];
+  qmRenderTags();
+  input.value = "";
+  document.getElementById("qm-suggestions").classList.remove("open");
+});
+
+const THEME_KEY = "hw-tracker-theme";
+function applyTheme(theme){
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = document.getElementById("themeToggle");
+  if (btn) btn.textContent = theme === "dark" ? "☀️ Light" : "🌙 Dark";
+  localStorage.setItem(THEME_KEY, theme);
+}
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  applyTheme(current === "dark" ? "light" : "dark");
+});
+applyTheme(localStorage.getItem(THEME_KEY) || "light");
+
+render();
+</script>
+</body>
+</html>
