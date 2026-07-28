@@ -35,6 +35,9 @@
   select{font-family:inherit;background:var(--panel);color:var(--ink);}
   button{padding:8px 12px;border:1px solid var(--border);border-radius:7px;background:var(--panel);font-size:13px;cursor:pointer;color:var(--ink);font-family:inherit;}
   button.primary{background:var(--c-violet);color:#fff;border-color:var(--c-violet);}
+  /* "+ Asset" chooser buttons: plain/white by default, purple on hover. */
+  button.chooser-btn{background:var(--panel);color:var(--ink);border-color:var(--border);transition:background-color .12s,color .12s,border-color .12s;}
+  button.chooser-btn:hover{background:var(--c-violet);color:#fff;border-color:var(--c-violet);}
   button:hover{filter:brightness(0.97);}
   main{padding:20px 24px 8px;}
 
@@ -276,7 +279,7 @@
   <div class="model-summary">
     <h3>Availability by model</h3>
     <div class="panel-tabs" id="summary-tabs" style="padding:0 0 8px;border-bottom:none;margin-bottom:4px;">
-      <button class="tab-btn" data-summary-tab="hardware">🖥 Hardware</button>
+      <button class="tab-btn" data-summary-tab="hardware"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><rect x="9" y="9" width="6" height="6" rx="0.5"></rect><line x1="9" y1="2" x2="9" y2="6"></line><line x1="12" y1="2" x2="12" y2="6"></line><line x1="15" y1="2" x2="15" y2="6"></line><line x1="9" y1="18" x2="9" y2="22"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="15" y1="18" x2="15" y2="22"></line><line x1="2" y1="9" x2="6" y2="9"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="2" y1="15" x2="6" y2="15"></line><line x1="18" y1="9" x2="22" y2="9"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="18" y1="15" x2="22" y2="15"></line></svg> Hardware</button>
       <button class="tab-btn" data-summary-tab="accessories">🎒 Accessories</button>
       <button class="tab-btn" data-summary-tab="all">📋 All</button>
     </div>
@@ -323,8 +326,8 @@
   <div class="modal">
     <h3>Add asset</h3>
     <div style="font-size:12.5px;color:var(--sub);margin:-8px 0 14px;">What kind of asset are you adding?</div>
-    <button id="chooser-device-btn" class="primary" style="width:100%;text-align:left;">🖥 Hardware Device<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Laptops, tablets, and other tracked production hardware</span></button>
-    <button id="chooser-accessory-btn" style="width:100%;text-align:left;margin-top:8px;">🎒 Accessory<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Tripods, lux meters, and other lower-priority gear</span></button>
+    <button id="chooser-device-btn" class="chooser-btn" style="width:100%;text-align:left;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><rect x="9" y="9" width="6" height="6" rx="0.5"></rect><line x1="9" y1="2" x2="9" y2="6"></line><line x1="12" y1="2" x2="12" y2="6"></line><line x1="15" y1="2" x2="15" y2="6"></line><line x1="9" y1="18" x2="9" y2="22"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="15" y1="18" x2="15" y2="22"></line><line x1="2" y1="9" x2="6" y2="9"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="2" y1="15" x2="6" y2="15"></line><line x1="18" y1="9" x2="22" y2="9"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="18" y1="15" x2="22" y2="15"></line></svg> Hardware Device<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Laptops, tablets, and other tracked production hardware</span></button>
+    <button id="chooser-accessory-btn" class="chooser-btn" style="width:100%;text-align:left;margin-top:8px;">🎒 Accessory<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Tripods, lux meters, and other lower-priority gear</span></button>
     <div class="modal-actions">
       <button id="chooser-cancel">Cancel</button>
     </div>
@@ -549,10 +552,15 @@
 const MASTER = "Master Inventory (Redmond, WA)";
 const STORE_KEY = "hw-tracker-demo-v4";
 
-// Power Automate flow URLs — Devices and Accessories are synced through these
-// to a shared Excel workbook, so everyone sees the same inventory data.
-// Projects, locations, tags, and notes are NOT synced yet; they stay local
-// to each browser for now.
+// Hardware/chip icon — replaces the old 🖥 emoji everywhere. Uses currentColor
+// so it automatically matches whatever text color surrounds it (violet when a
+// tab is active, white on hover/primary buttons, plain ink otherwise), the
+// same way the emoji used to.
+const ICON_HW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><rect x="9" y="9" width="6" height="6" rx="0.5"></rect><line x1="9" y1="2" x2="9" y2="6"></line><line x1="12" y1="2" x2="12" y2="6"></line><line x1="15" y1="2" x2="15" y2="6"></line><line x1="9" y1="18" x2="9" y2="22"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="15" y1="18" x2="15" y2="22"></line><line x1="2" y1="9" x2="6" y2="9"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="2" y1="15" x2="6" y2="15"></line><line x1="18" y1="9" x2="22" y2="9"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="18" y1="15" x2="22" y2="15"></line></svg>`;
+
+// Power Automate flow URLs — Devices, Accessories, Projects, Locations, tags,
+// and notes are all synced through these to a shared Excel workbook, so
+// everyone sees the same inventory data.
 const EXCEL_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
 const EXCEL_SAVE_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8321f587f8794d59bd823e9f11d344eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=_63H721P92mYyQcIRlTTJEJaw1AeCginHq_YzqATEq0";
 
@@ -1449,13 +1457,13 @@ function render(){
       </div>
     </div>
     ${showHW ? `
-      <div class="section-head">🖥 Hardware <span class="tab-count">${mainDevices.length}</span></div>
+      <div class="section-head">${ICON_HW} Hardware <span class="tab-count">${mainDevices.length}</span></div>
       <div class="drop-target" data-bucket="${mainBucket}" data-kind="hardware">⬇ Drop hardware here to move into ${mainBucket}</div>
       <div class="col-labels full${mainHasLocs ? " loc" : ""}"><span></span>${sortLabel("serial","Serial")}${sortLabel("tag","Tag")}${sortLabel("model","Model")}${sortLabel("status","Status")}${mainHasLocs ? "<span>Location</span>" : ""}</div>
       <div class="rows-list" id="main-rows"></div>
     ` : ""}
     ${showAcc ? `
-      <div class="section-head">🎒 Accessories <span class="tab-count">${mainAccessories.length}</span><button class="tab-add-btn" data-bucket="${mainBucket}">+ Accessory</button></div>
+      <div class="section-head">🎒 Accessories <span class="tab-count">${mainAccessories.length}</span></div>
       <div class="drop-target" data-bucket="${mainBucket}" data-kind="accessory">⬇ Drop an accessory here to move into ${mainBucket}</div>
       <div class="col-labels acc full"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Location</span><span></span></div>
       <div class="rows-list" id="main-acc-rows"></div>
@@ -1492,13 +1500,13 @@ function render(){
           </div>
         </div>
         ${showHW ? `
-          <div class="section-head compact">🖥 <span class="tab-count">${count}</span></div>
+          <div class="section-head compact">${ICON_HW} <span class="tab-count">${count}</span></div>
           <div class="drop-target" data-bucket="${b}" data-kind="hardware">⬇ Drop hardware here</div>
           <div class="col-labels compact${bHasLocs ? " loc" : ""}"><span></span>${sortLabel("serial","Serial")}${sortLabel("tag","Tag")}${sortLabel("status","Status")}${bHasLocs ? "<span>Location</span>" : ""}</div>
           <div class="rows-list" data-bucket="${b}" data-kind="hardware"></div>
         ` : ""}
         ${showAcc ? `
-          <div class="section-head compact">🎒 <span class="tab-count">${accCount}</span><button class="tab-add-btn" data-bucket="${b}">+</button></div>
+          <div class="section-head compact">🎒 <span class="tab-count">${accCount}</span></div>
           <div class="drop-target" data-bucket="${b}" data-kind="accessory">⬇ Drop an accessory here</div>
           <div class="col-labels acc compact"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("status","Status")}<span>Loc</span><span></span></div>
           <div class="rows-list" data-bucket="${b}" data-kind="accessory"></div>
