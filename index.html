@@ -857,6 +857,28 @@ function normalizeState(){
     if (!a.status) a.status = "instock";
     if (typeof a.bucket !== "string" || !state.buckets.includes(a.bucket)) a.bucket = MASTER;
   });
+  // One-time: accessories used to get auto-IDs like "acc-1785201825554" (a
+  // timestamp) — switch to short sequential IDs ("a1", "a2", ...), matching
+  // how hardware IDs already work and making them far easier to type by hand
+  // when bulk-importing a batch of new equipment. Existing "acc-..." ids are
+  // renumbered in creation order; anything already in the new format is left
+  // untouched (so this is a no-op once everything's already renumbered).
+  let renumberedAccessoryIds = false;
+  if (state.accessories.some(a => !/^a\d+$/.test(a.id || ""))){
+    renumberedAccessoryIds = true;
+    state.accessories
+      .slice()
+      .sort((x, y) => String(x.id).localeCompare(String(y.id)))
+      .forEach(a => {
+        if (/^a\d+$/.test(a.id || "")) return;
+        let max = 0;
+        state.accessories.forEach(other => {
+          const m = /^a(\d+)$/.exec(other.id || "");
+          if (m) max = Math.max(max, parseInt(m[1], 10));
+        });
+        a.id = "a" + (max + 1);
+      });
+  }
   // Nothing should ever sit "Unassigned". Master Inventory always has exactly
   // one real location (everything there is assumed to be in Redmond); every
   // other project always has at least one location too (enforced at project
@@ -882,10 +904,10 @@ function normalizeState(){
   delete state.accTab;
   if (!state.modelTags) state.modelTags = {};
 
-  // If anything actually got renamed off the old Master Inventory name above,
-  // push the fix to Excel right away rather than waiting for some unrelated
-  // future edit to carry it along.
-  if (renamedLegacyMaster) save();
+  // If anything actually changed in the one-time migrations above, push the
+  // fix to Excel right away rather than waiting for some unrelated future
+  // edit to carry it along.
+  if (renamedLegacyMaster || renumberedAccessoryIds) save();
 }
 
 let state = JSON.parse(localStorage.getItem(STORE_KEY) || "null") || seed();
@@ -2535,6 +2557,17 @@ function updateAccessoryLocationOptions(){
   // accessories always start with somewhere real to be.
   document.getElementById("acc-location").innerHTML = locOptions(locs, locs[0] || "");
 }
+// Short sequential id ("a1", "a2", ...) for a newly added accessory — matches
+// how hardware ids already work, and is much easier to hand-type than a
+// timestamp when preparing a bulk import of new equipment.
+function nextAccessoryId(){
+  let max = 0;
+  state.accessories.forEach(a => {
+    const m = /^a(\d+)$/.exec(a.id || "");
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return "a" + (max + 1);
+}
 function openAddAccessoryModal(bucket){
   document.getElementById("acc-bucket").innerHTML = destOptions(bucket);
   document.getElementById("acc-model").value = "";
@@ -2563,7 +2596,7 @@ document.getElementById("acc-save").onclick = () => {
       return;
     }
   }
-  state.accessories.push({ id: "acc-" + Date.now().toString(), tag, model, serial, status, location, bucket });
+  state.accessories.push({ id: nextAccessoryId(), tag, model, serial, status, location, bucket });
   save(); render();
   accessoryModal.classList.remove("open");
 };
