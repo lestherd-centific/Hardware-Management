@@ -1163,6 +1163,11 @@ function wireDropZone(el, bucket, kind){
     e.preventDefault();
     el.classList.remove("dragover");
     const id = e.dataTransfer.getData(dtype);
+    // Clear the reveal classes here directly, rather than relying only on
+    // "dragend" — the render() below rebuilds the dragged row's DOM element,
+    // which can prevent the browser's dragend event from ever reaching the
+    // cleanup listener, leaving the green box stuck open.
+    document.body.classList.remove("dragging-device", "dragging-accessory");
     if (kind === "accessory") moveAccessory(id, bucket);
     else dropInto(id, bucket);
   });
