@@ -602,6 +602,13 @@ const ICON_HW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" str
 // everyone sees the same inventory data.
 const EXCEL_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
 const EXCEL_SAVE_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8321f587f8794d59bd823e9f11d344eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=_63H721P92mYyQcIRlTTJEJaw1AeCginHq_YzqATEq0";
+// One-off flow: appends a single row to the ActivityLog table (does NOT
+// replace the whole table, unlike Save above) so activity from every user
+// merges safely without anyone's log entries getting overwritten. Paste in
+// the trigger URL for the new "Log Activity" flow once it's built in Power
+// Automate — until then this stays a placeholder and activity logging is
+// simply skipped over the network (still works locally).
+const EXCEL_LOG_URL = "PASTE_YOUR_LOG_ACTIVITY_FLOW_URL_HERE";
 
 // Seed data pulled from the "Device Returns" tab of Inventory Tracker(1).xlsx.
 // Original per-site location is ignored — everything below has been returned
@@ -918,7 +925,65 @@ function save(){
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
   pushToExcel();
 }
-function logActivity(entry){ state.log.unshift(entry); }
+function logActivity(entry){
+  // A stable id (embeds the creation timestamp) so the same entry can be
+  // recognized after a round trip through Excel — that's what lets entries
+  // from every user merge together without duplicating or reordering.
+  if (!entry.id) entry.id = "log-" + Date.now().toString() + Math.random().toString(36).slice(2);
+  // Attribute to whoever's logged in right now; falls back to "Unknown" for
+  // anyone using the app before the login gate has any Credentials rows.
+  if (!entry.by) entry.by = (authInfo && (authInfo.name || authInfo.login)) || "Unknown";
+  state.log.unshift(entry);
+  pushLogEntryToExcel(entry);
+}
+
+// Fire-and-forget: appends this one entry to the shared ActivityLog table in
+// Excel. Deliberately doesn't block or retry on failure — losing a shared
+// copy of one log line isn't worth stalling the UI over, and the entry is
+// already safe in this browser's local log either way.
+async function pushLogEntryToExcel(entry){
+  if (!EXCEL_LOG_URL || EXCEL_LOG_URL.indexOf("PASTE_YOUR") === 0) return;
+  try {
+    const res = await fetch(EXCEL_LOG_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: String(entry.id || ""), ts: String(entry.ts || ""), type: String(entry.type || ""),
+        tag: String(entry.tag || ""), deviceId: String(entry.deviceId || ""),
+        from: String(entry.from || ""), to: String(entry.to || ""), by: String(entry.by || "")
+      })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  } catch (err){
+    console.error("Activity log sync failed (kept locally only):", err);
+  }
+}
+
+// Extracts the millisecond timestamp embedded at the start of a log id, for
+// sorting merged entries from every user back into one consistent order.
+function logIdTimestamp(id){
+  const m = /^log-(\d+)/.exec(id || "");
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+// Merges the shared ActivityLog rows from Excel with whatever's local. Remote
+// rows (shared across every user) win on id match; any purely local entry
+// that hasn't made it to Excel yet (in flight, or the push failed) is kept
+// too, so a slow network never silently loses an entry — it just dedupes
+// automatically once Excel catches up on a later load.
+function mergeRemoteLog(rows){
+  const remote = (rows || [])
+    .filter(r => r && r.id)
+    .map(r => ({
+      id: String(r.id), ts: String(r.ts || ""), type: String(r.type || ""), tag: String(r.tag || ""),
+      deviceId: String(r.deviceid || r.deviceId || ""), from: String(r.from || ""), to: String(r.to || ""),
+      by: String(r.by || "")
+    }));
+  const remoteIds = new Set(remote.map(e => e.id));
+  const localOnly = state.log.filter(e => e.id && !remoteIds.has(e.id));
+  state.log = [...remote, ...localOnly].sort((a, b) => logIdTimestamp(b.id) - logIdTimestamp(a.id));
+  if (state.log.length > 200) state.log.length = 200;
+}
 
 // --- Excel sync (via Power Automate) ---
 // Devices + Accessories are the shared source of truth in Excel. Every local
@@ -1145,6 +1210,10 @@ async function loadFromExcel(){
     mergeRemoteLocations(data.locations || []);
     mergeRemoteDevices(data.devices || []);
     mergeRemoteAccessories(data.accessories || []);
+    // Only merge once the Excel side actually has an ActivityLog step wired
+    // into the Load flow's response — until then this key is simply absent,
+    // and activity stays exactly as local-only as it's always been.
+    if (data.activityLog !== undefined) mergeRemoteLog(data.activityLog || []);
     const tagsByModel = {};
     collectModelTags(data.devices || [], tagsByModel);
     collectModelTags(data.accessories || [], tagsByModel);
@@ -2098,7 +2167,12 @@ function updateStatus(id, newStatus){
   if (!d || d.status === newStatus) return;
   const from = d.status;
   d.status = newStatus;
-  logActivity({ ts: new Date().toLocaleString(), type: "status", tag: d.serial, deviceId: d.id, from: statusLabel(from), to: statusLabel(newStatus) });
+  // Toggling between In stock and In use happens constantly and just spams
+  // the activity feed with noise — only log a status change when broken-ness
+  // is involved (either direction), since that's the one that actually matters.
+  if (from === "broken" || newStatus === "broken"){
+    logActivity({ ts: new Date().toLocaleString(), type: "status", tag: d.serial, deviceId: d.id, from: statusLabel(from), to: statusLabel(newStatus) });
+  }
   save();
   render();
 }
@@ -2131,10 +2205,11 @@ function openDeviceDetail(id){
   const history = state.log.filter(e => e.deviceId === id);
   const histEl = document.getElementById("dd-history");
   histEl.innerHTML = history.length ? history.map(e => {
+    const who = e.by ? `<b>${e.by}</b> ` : "";
     let text;
-    if (e.type === "status") text = `Status changed from ${e.from} to <b>${e.to}</b>`;
-    else if (e.type === "location") text = `Location changed from ${e.from} to <b>${e.to}</b>`;
-    else text = `Moved from ${e.from} to <b>${e.to}</b>`;
+    if (e.type === "status") text = `${who}changed status from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "location") text = `${who}changed location from ${e.from} to <b>${e.to}</b>`;
+    else text = `${who}moved from ${e.from} to <b>${e.to}</b>`;
     return `<div class="log-entry">${text}<br>${e.ts}</div>`;
   }).join("") : `<div class="log-entry">No tracked history yet.</div>`;
 
@@ -2222,15 +2297,16 @@ function renderLog(){
     return;
   }
   el.innerHTML = state.log.slice(0,60).map(e => {
+    const who = e.by ? `<b>${e.by}</b> ` : "";
     let text;
-    if (e.type === "status") text = `<b>${e.tag}</b> status changed from ${e.from} to <b>${e.to}</b>`;
-    else if (e.type === "location") text = `<b>${e.tag}</b> location changed from ${e.from} to <b>${e.to}</b>`;
-    else if (e.type === "location-delete") text = `Location <b>${e.from}</b> deleted from <b>${e.tag}</b>` + (e.to > 0 ? ` (${e.to} device${e.to===1?"":"s"} moved to Unassigned)` : "");
-    else if (e.type === "archive") text = e.to === "Archived" ? `<b>${e.tag}</b> project was archived` : `<b>${e.tag}</b> project was restored`;
-    else if (e.type === "delete") text = `<b>${e.tag}</b> was deleted from ${e.from}`;
-    else if (e.type === "rename") text = `Project <b>${e.from}</b> renamed to <b>${e.to}</b>`;
-    else if (e.type === "delete-project") text = `Archived project <b>${e.tag}</b> was permanently deleted`;
-    else text = `<b>${e.tag}</b> moved from ${e.from} → <b>${e.to}</b>`;
+    if (e.type === "status") text = `${who}changed <b>${e.tag}</b> status from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "location") text = `${who}changed <b>${e.tag}</b> location from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "location-delete") text = `${who}deleted location <b>${e.from}</b> from <b>${e.tag}</b>` + (e.to > 0 ? ` (${e.to} device${e.to===1?"":"s"} moved to Unassigned)` : "");
+    else if (e.type === "archive") text = e.to === "Archived" ? `${who}archived <b>${e.tag}</b>` : `${who}restored <b>${e.tag}</b>`;
+    else if (e.type === "delete") text = `${who}deleted <b>${e.tag}</b> from ${e.from}`;
+    else if (e.type === "rename") text = `${who}renamed project <b>${e.from}</b> to <b>${e.to}</b>`;
+    else if (e.type === "delete-project") text = `${who}permanently deleted archived project <b>${e.tag}</b>`;
+    else text = `${who}moved <b>${e.tag}</b> from ${e.from} → <b>${e.to}</b>`;
     return `<div class="log-entry">${text}<br>${e.ts}</div>`;
   }).join("");
 }
