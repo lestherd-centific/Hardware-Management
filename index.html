@@ -335,8 +335,10 @@
     <label>Serial number</label><input id="d-serial" placeholder="e.g. SN-88213">
     <label>Status</label>
     <select id="d-status"><option value="instock">In stock</option><option value="inuse">In use</option><option value="broken">Broken</option></select>
-    <label>Starting location</label>
+    <label>Project</label>
     <select id="d-bucket"></select>
+    <label id="d-location-label">Location</label>
+    <select id="d-location"></select>
     <div class="modal-actions">
       <button id="d-cancel">Cancel</button>
       <button id="d-save" class="primary">Add</button>
@@ -370,6 +372,8 @@
   <div class="modal">
     <h3>Add project</h3>
     <label>Project name</label><input id="p-name" placeholder="e.g. Project Nova">
+    <label>Starting location</label><input id="p-location" placeholder="e.g. Building A">
+    <div class="qm-hint">Every project needs at least one location so new devices always have somewhere to go — you can add more later.</div>
     <div class="modal-actions">
       <button id="p-cancel">Cancel</button>
       <button id="p-save" class="primary">Add</button>
@@ -813,9 +817,29 @@ function ensureBucketExists(bucket){
   if (!state.accTab[bucket]) state.accTab[bucket] = "hardware";
 }
 
+// Notes format in the "notes" column: one note per line, each line "ts: text".
+function parseNotesColumn(raw){
+  return String(raw || "").split("\n").map(line => line.trim()).filter(Boolean).map(line => {
+    const idx = line.indexOf(": ");
+    if (idx === -1) return { ts: "", text: line };
+    return { ts: line.slice(0, idx), text: line.slice(idx + 2) };
+  });
+}
+function buildNotesColumn(notes){
+  return (notes || []).map(n => `${n.ts || ""}: ${n.text || ""}`).join("\n");
+}
+
+// Tags format in the "tags" column: semicolon-separated list, e.g. "Tablet;Loaner".
+function collectModelTags(rows, into){
+  rows.forEach(r => {
+    const model = String(r.model || "").trim();
+    const tagsRaw = String(r.tags || "").trim();
+    if (!model || !tagsRaw || into[model]) return;
+    into[model] = tagsRaw.split(";").map(t => t.trim()).filter(Boolean);
+  });
+}
+
 function mergeRemoteDevices(rows){
-  const existingNotes = {};
-  state.devices.forEach(d => { existingNotes[String(d.id)] = d.notes || []; });
   state.devices = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
     const id = String(r.id || (Date.now().toString() + Math.random().toString(36).slice(2)));
     const bucket = String(r.bucket || MASTER);
@@ -828,7 +852,7 @@ function mergeRemoteDevices(rows){
       status: (r.status === "inuse" || r.status === "broken") ? r.status : "instock",
       bucket,
       location: String(r.location || ""),
-      notes: existingNotes[id] || [] // notes aren't synced to Excel yet — preserved locally if this browser already had them
+      notes: parseNotesColumn(r.notes)
     };
   });
 }
@@ -849,14 +873,58 @@ function mergeRemoteAccessories(rows){
   });
 }
 
+// Projects: which are active vs archived. Personal UI prefs (pinned/minimized/
+// which tab is showing) stay local — only existence + archived status is shared.
+function mergeRemoteProjects(rows){
+  const active = [];
+  const archived = [];
+  rows.forEach(r => {
+    const name = String(r.name || "").trim();
+    if (!name || name === MASTER) return;
+    if (String(r.archived || "").toLowerCase() === "true"){
+      archived.push({ name, archivedAt: String(r.archivedAt || "") });
+    } else {
+      active.push(name);
+    }
+  });
+  state.buckets = [MASTER, ...active];
+  state.archived = archived;
+  state.buckets.forEach(b => {
+    if (!state.locations[b]) state.locations[b] = [];
+    if (!state.accTab[b]) state.accTab[b] = "hardware";
+  });
+  if (!state.buckets.includes(state.featured)) state.featured = MASTER;
+  state.minimized = state.minimized.filter(b => state.buckets.includes(b));
+}
+
+// Locations are their own table specifically so a project can have a location
+// added ahead of time, before any device/accessory has ever used it.
+function mergeRemoteLocations(rows){
+  const byBucket = {};
+  rows.forEach(r => {
+    const bucket = String(r.bucket || "").trim();
+    const name = String(r.name || "").trim();
+    if (!bucket || !name) return;
+    if (!byBucket[bucket]) byBucket[bucket] = [];
+    if (!byBucket[bucket].includes(name)) byBucket[bucket].push(name);
+  });
+  state.buckets.forEach(b => { state.locations[b] = byBucket[b] || []; });
+}
+
 async function loadFromExcel(){
   setSyncStatus("Loading shared data from Excel…");
   try {
     const res = await fetch(EXCEL_LOAD_URL);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
+    mergeRemoteProjects(data.projects || []);
+    mergeRemoteLocations(data.locations || []);
     mergeRemoteDevices(data.devices || []);
     mergeRemoteAccessories(data.accessories || []);
+    const tagsByModel = {};
+    collectModelTags(data.devices || [], tagsByModel);
+    collectModelTags(data.accessories || [], tagsByModel);
+    state.modelTags = tagsByModel;
     normalizeState();
     render();
     setSyncStatus("Synced with Excel");
@@ -871,12 +939,34 @@ function pushToExcel(){
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     setSyncStatus("Saving to Excel…");
+
+    const projectsPayload = [
+      ...state.buckets.filter(b => b !== MASTER).map(name => ({ name, archived: "false", archivedAt: "" })),
+      ...state.archived.map(a => ({ name: a.name, archived: "true", archivedAt: String(a.archivedAt || "") }))
+    ];
+
+    const locationsPayload = [];
+    Object.keys(state.locations).forEach(bucket => {
+      (state.locations[bucket] || []).forEach(name => locationsPayload.push({ bucket, name }));
+    });
+
     fetch(EXCEL_SAVE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        devices: state.devices.map(d => ({ id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""), status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || "") })),
-        accessories: state.accessories.map(a => ({ id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""), status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || "") }))
+        devices: state.devices.map(d => ({
+          id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""),
+          status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || ""),
+          tags: (state.modelTags[d.model] || []).join(";"),
+          notes: buildNotesColumn(d.notes)
+        })),
+        accessories: state.accessories.map(a => ({
+          id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""),
+          status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || ""),
+          tags: (state.modelTags[a.model] || []).join(";")
+        })),
+        projects: projectsPayload,
+        locations: locationsPayload
       })
     }).then(res => {
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1867,10 +1957,22 @@ document.getElementById("chooser-accessory-btn").onclick = () => {
 
 // Add device modal
 const deviceModal = document.getElementById("deviceModalBackdrop");
+function updateDeviceLocationOptions(){
+  const bucket = document.getElementById("d-bucket").value;
+  const isMaster = bucket === MASTER;
+  document.getElementById("d-location-label").style.display = isMaster ? "none" : "";
+  document.getElementById("d-location").style.display = isMaster ? "none" : "";
+  const locs = state.locations[bucket] || [];
+  // Default to the project's first location instead of "Unassigned" so new
+  // devices always start with somewhere real to be.
+  document.getElementById("d-location").innerHTML = locOptions(locs, locs[0] || "");
+}
 function openAddDeviceModal(){
   document.getElementById("d-bucket").innerHTML = destOptions(MASTER);
+  updateDeviceLocationOptions();
   deviceModal.classList.add("open");
 }
+document.getElementById("d-bucket").addEventListener("change", updateDeviceLocationOptions);
 document.getElementById("d-cancel").onclick = () => deviceModal.classList.remove("open");
 document.getElementById("d-save").onclick = () => {
   const tag = document.getElementById("d-tag").value.trim();
@@ -1878,8 +1980,9 @@ document.getElementById("d-save").onclick = () => {
   const serial = document.getElementById("d-serial").value.trim();
   const status = document.getElementById("d-status").value;
   const bucket = document.getElementById("d-bucket").value;
+  const location = bucket === MASTER ? "" : document.getElementById("d-location").value;
   if (!model){ alert("Model is required."); return; }
-  state.devices.push({ id: Date.now().toString(), tag: tag || "—", model, serial: serial || "—", status, bucket, location: "", notes: [] });
+  state.devices.push({ id: Date.now().toString(), tag: tag || "—", model, serial: serial || "—", status, bucket, location, notes: [] });
   save(); render();
   deviceModal.classList.remove("open");
   ["d-tag","d-model","d-serial"].forEach(id => document.getElementById(id).value = "");
@@ -1892,13 +1995,17 @@ document.getElementById("addProjectBtn").onclick = () => projectModal.classList.
 document.getElementById("p-cancel").onclick = () => projectModal.classList.remove("open");
 document.getElementById("p-save").onclick = () => {
   const name = document.getElementById("p-name").value.trim();
-  if (!name){ return; }
+  const startingLocation = document.getElementById("p-location").value.trim();
+  if (!name){ alert("Project name is required."); return; }
+  if (!startingLocation){ alert("A starting location is required — every project needs at least one."); return; }
   if (state.buckets.includes(name)){ alert("That project already exists."); return; }
   state.buckets.push(name);
-  state.locations[name] = [];
+  state.locations[name] = [startingLocation];
+  state.accTab[name] = "hardware";
   save(); render();
   projectModal.classList.remove("open");
   document.getElementById("p-name").value = "";
+  document.getElementById("p-location").value = "";
 };
 
 // Add location modal
@@ -1927,14 +2034,27 @@ let deleteLocationTarget = null;
 const deleteLocationModal = document.getElementById("deleteLocationConfirmBackdrop");
 function openDeleteLocationConfirm(bucket, name){
   deleteLocationTarget = { bucket, name };
-  const devCount = state.devices.filter(d => d.bucket === bucket && d.location === name).length;
-  const accCount = state.accessories.filter(a => a.bucket === bucket && a.location === name).length;
-  const parts = [];
-  if (devCount) parts.push(`${devCount} device${devCount===1?"":"s"}`);
-  if (accCount) parts.push(`${accCount} accessor${accCount===1?"y":"ies"}`);
-  document.getElementById("delete-location-message").innerHTML =
-    `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from both the Hardware and Accessories tabs.` +
-    (parts.length ? `<br><br>${parts.join(" and ")} there will move back to Unassigned.` : "");
+  const okBtn = document.getElementById("delete-location-ok");
+  const cancelBtn = document.getElementById("delete-location-cancel");
+  const isLastLocation = bucket !== MASTER && (state.locations[bucket] || []).length <= 1;
+
+  if (isLastLocation){
+    document.getElementById("delete-location-message").innerHTML =
+      `<b>${bucket}</b> needs at least one location. Add another location before removing <b>${name}</b>.`;
+    okBtn.style.display = "none";
+    cancelBtn.textContent = "OK";
+  } else {
+    const devCount = state.devices.filter(d => d.bucket === bucket && d.location === name).length;
+    const accCount = state.accessories.filter(a => a.bucket === bucket && a.location === name).length;
+    const parts = [];
+    if (devCount) parts.push(`${devCount} device${devCount===1?"":"s"}`);
+    if (accCount) parts.push(`${accCount} accessor${accCount===1?"y":"ies"}`);
+    document.getElementById("delete-location-message").innerHTML =
+      `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from both the Hardware and Accessories tabs.` +
+      (parts.length ? `<br><br>${parts.join(" and ")} there will move back to Unassigned.` : "");
+    okBtn.style.display = "";
+    cancelBtn.textContent = "Cancel";
+  }
   deleteLocationModal.classList.add("open");
 }
 document.getElementById("delete-location-cancel").onclick = () => deleteLocationModal.classList.remove("open");
