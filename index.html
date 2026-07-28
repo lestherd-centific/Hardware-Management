@@ -210,6 +210,7 @@
   .log-entry b{color:var(--ink);}
 
   .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(28,27,41,.35);align-items:center;justify-content:center;z-index:10;}
+  #authGateBackdrop{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:rgba(28,27,41,.55);}
   .modal-backdrop.open{display:flex;}
   .modal{background:var(--panel);color:var(--ink);border-radius:12px;padding:20px;width:340px;}
   .modal.modal-wide{width:560px;max-width:90vw;max-height:85vh;overflow-y:auto;}
@@ -335,7 +336,7 @@
     <div id="auth-login-loading" style="font-size:12.5px;color:var(--sub);margin:-8px 0 12px;">Loading access list…</div>
     <div id="auth-login-form" style="display:none;">
       <label>Login</label>
-      <input id="auth-login-input" placeholder="e.g. lesther-DCHW" autocomplete="off">
+      <input id="auth-login-input" placeholder="Enter your login" autocomplete="off">
       <div id="auth-login-error" style="color:var(--st-broken);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
       <div class="modal-actions">
         <button id="auth-login-submit" class="primary" style="width:100%;">Enter</button>
@@ -586,7 +587,7 @@
 </div>
 
 <script>
-const MASTER = "Master Inventory (Redmond, WA)";
+const MASTER = "Master Inventory";
 const MASTER_LOCATION = "WA.Redmond";
 const STORE_KEY = "hw-tracker-demo-v4";
 
@@ -801,6 +802,28 @@ function seed(){
 }
 
 function normalizeState(){
+  // One-time rename: Master Inventory used to include "(Redmond, WA)" in its
+  // name, which is now redundant since Location already shows "WA.Redmond"
+  // for everything there. Treat the old name as equivalent to MASTER
+  // wherever it might still linger — existing browser data, or rows already
+  // saved in Excel under the old name — and push the correction back once.
+  const LEGACY_MASTER = "Master Inventory (Redmond, WA)";
+  let renamedLegacyMaster = false;
+  if (state.featured === LEGACY_MASTER){ state.featured = MASTER; renamedLegacyMaster = true; }
+  if (state.buckets.includes(LEGACY_MASTER)){
+    state.buckets = state.buckets.map(b => b === LEGACY_MASTER ? MASTER : b);
+    renamedLegacyMaster = true;
+  }
+  if (state.minimized) state.minimized = state.minimized.map(b => b === LEGACY_MASTER ? MASTER : b);
+  if (state.locations && state.locations[LEGACY_MASTER]){
+    state.locations[MASTER] = state.locations[MASTER] || [];
+    state.locations[LEGACY_MASTER].forEach(l => { if (!state.locations[MASTER].includes(l)) state.locations[MASTER].push(l); });
+    delete state.locations[LEGACY_MASTER];
+    renamedLegacyMaster = true;
+  }
+  (state.devices || []).forEach(d => { if (d.bucket === LEGACY_MASTER){ d.bucket = MASTER; renamedLegacyMaster = true; } });
+  (state.accessories || []).forEach(a => { if (a.bucket === LEGACY_MASTER){ a.bucket = MASTER; renamedLegacyMaster = true; } });
+
   if (!state.featured || !state.buckets.includes(state.featured)) state.featured = MASTER;
   if (!state.archived) state.archived = [];
   if (!state.minimized) state.minimized = [];
@@ -858,6 +881,11 @@ function normalizeState(){
   delete state.summaryTab;
   delete state.accTab;
   if (!state.modelTags) state.modelTags = {};
+
+  // If anything actually got renamed off the old Master Inventory name above,
+  // push the fix to Excel right away rather than waiting for some unrelated
+  // future edit to carry it along.
+  if (renamedLegacyMaster) save();
 }
 
 let state = JSON.parse(localStorage.getItem(STORE_KEY) || "null") || seed();
@@ -1679,7 +1707,7 @@ function render(){
   mainEl.innerHTML = `
     <div class="panel-head">
       <div>
-        <div class="tag">${mainIsMaster ? "Master · Redmond, WA" : "Project · Pinned"}</div>
+        <div class="tag">${mainIsMaster ? "Master" : "Project · Pinned"}</div>
         <h2>${mainBucket}</h2>
       </div>
       <div class="head-actions">
@@ -1721,7 +1749,7 @@ function render(){
       <div class="mini-card${isMin ? " minimized" : ""}" data-bucket="${b}" draggable="true">
         <div class="panel-head">
           <div>
-            <div class="tag"><span class="card-handle" title="Drag to reorder">⠿</span>${isMaster ? "Master · Redmond, WA" : "Project"}</div>
+            <div class="tag"><span class="card-handle" title="Drag to reorder">⠿</span>${isMaster ? "Master" : "Project"}</div>
             <h2>${b}</h2>
           </div>
           <div class="head-actions">
