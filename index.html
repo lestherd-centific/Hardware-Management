@@ -962,18 +962,34 @@ function mergeRemoteLocations(rows){
   state.buckets.forEach(b => { state.locations[b] = byBucket[b] || []; });
 }
 
-// Raw JSON text from the most recent successful Excel load — kept so a save
+// A fingerprint of the most recent successful Excel load — kept so a save
 // can check whether Excel has changed since this session last saw it.
+// Built from only the fields we actually care about, with rows sorted into
+// a fixed order, so it's stable across repeat reads of unchanged data —
+// row order, incidental whitespace, and any extra fields Power Automate
+// happens to include don't cause a false "something changed" reading.
 let lastLoadSnapshot = null;
+
+function computeFleetFingerprint(data){
+  const norm = (rows, keys) => (rows || [])
+    .map(r => keys.map(k => String(r[k] ?? "").replace(/\r\n/g, "\n").trim()).join("|"))
+    .sort()
+    .join("\n");
+  return [
+    norm(data.devices, ["id","tag","model","serial","status","bucket","location","tags","notes"]),
+    norm(data.accessories, ["id","tag","model","serial","status","bucket","location","tags"]),
+    norm(data.projects, ["name","archived","archivedAt"]),
+    norm(data.locations, ["bucket","name"])
+  ].join("\n---\n");
+}
 
 async function loadFromExcel(){
   setSyncStatus("Loading shared data from Excel…");
   try {
     const res = await fetch(EXCEL_LOAD_URL);
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const rawText = await res.text();
-    lastLoadSnapshot = rawText;
-    const data = JSON.parse(rawText);
+    const data = await res.json();
+    lastLoadSnapshot = computeFleetFingerprint(data);
     mergeRemoteProjects(data.projects || []);
     mergeRemoteLocations(data.locations || []);
     mergeRemoteDevices(data.devices || []);
@@ -1013,8 +1029,9 @@ async function doPushToExcel(){
     try {
       const checkRes = await fetch(EXCEL_LOAD_URL);
       if (checkRes.ok){
-        const freshText = await checkRes.text();
-        if (lastLoadSnapshot !== null && freshText !== lastLoadSnapshot){
+        const freshData = await checkRes.json();
+        const freshFingerprint = computeFleetFingerprint(freshData);
+        if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot){
           setSyncStatus("Couldn't save — someone else made changes");
           showSyncConflictModal();
           return;
