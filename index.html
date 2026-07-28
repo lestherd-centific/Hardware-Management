@@ -291,7 +291,7 @@
     <div class="model-table-wrap" id="hw-model-table-wrap">
       <table class="model-table">
         <thead>
-          <tr><th>Model</th><th class="num">In Master</th><th class="num">In stock</th><th class="num">In use</th><th class="num">Broken</th></tr>
+          <tr><th>Model</th><th class="num">Total</th><th class="num">In Master</th><th class="num">Out</th><th class="num">In stock</th><th class="num">In use</th><th class="num">Broken</th></tr>
         </thead>
         <tbody id="model-table-body"></tbody>
         <tfoot id="model-table-foot"></tfoot>
@@ -1628,18 +1628,24 @@ function renderHardwareModelTable(){
   const body = document.getElementById("model-table-body");
   const foot = document.getElementById("model-table-foot");
 
-  // Count devices currently sitting in Master Inventory, grouped by model.
+  // Count every device of this model across the whole fleet — Master
+  // Inventory plus every project — so a model shows up here as soon as it
+  // exists anywhere, not just once it's stocked in Master. "In Master" vs
+  // "Out" gives a reference point for how many are centrally available
+  // versus currently checked out to a project.
   const counts = {};
-  state.devices.filter(d => d.bucket === MASTER).forEach(d => {
-    if (!counts[d.model]) counts[d.model] = { total: 0, instock: 0, inuse: 0, broken: 0 };
-    counts[d.model].total++;
-    counts[d.model][d.status]++;
+  state.devices.forEach(d => {
+    if (!counts[d.model]) counts[d.model] = { total: 0, master: 0, out: 0, instock: 0, inuse: 0, broken: 0 };
+    const c = counts[d.model];
+    c.total++;
+    if (d.bucket === MASTER) c.master++; else c.out++;
+    c[d.status]++;
   });
 
   const models = Object.keys(counts).sort((a,b) => counts[b].total - counts[a].total);
 
   if (models.length === 0){
-    body.innerHTML = `<tr><td colspan="5" class="empty-hint">No devices currently in Master Inventory.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="7" class="empty-hint">No devices added yet.</td></tr>`;
     foot.innerHTML = "";
     return;
   }
@@ -1650,6 +1656,8 @@ function renderHardwareModelTable(){
       <tr class="model-row-click" data-model="${m}" data-kind="hardware" title="Click for a project breakdown and tags">
         <td>${m}</td>
         <td class="num">${c.total}</td>
+        <td class="num">${c.master}</td>
+        <td class="num">${c.out}</td>
         <td class="num status-num instock">${c.instock}</td>
         <td class="num status-num inuse">${c.inuse}</td>
         <td class="num status-num broken">${c.broken}</td>
@@ -1662,14 +1670,17 @@ function renderHardwareModelTable(){
 
   const totals = models.reduce((acc, m) => {
     const c = counts[m];
-    acc.total += c.total; acc.instock += c.instock; acc.inuse += c.inuse; acc.broken += c.broken;
+    acc.total += c.total; acc.master += c.master; acc.out += c.out;
+    acc.instock += c.instock; acc.inuse += c.inuse; acc.broken += c.broken;
     return acc;
-  }, { total:0, instock:0, inuse:0, broken:0 });
+  }, { total:0, master:0, out:0, instock:0, inuse:0, broken:0 });
 
   foot.innerHTML = `
     <tr>
       <td>Total</td>
       <td class="num">${totals.total}</td>
+      <td class="num">${totals.master}</td>
+      <td class="num">${totals.out}</td>
       <td class="num status-num instock">${totals.instock}</td>
       <td class="num status-num inuse">${totals.inuse}</td>
       <td class="num status-num broken">${totals.broken}</td>
@@ -2032,6 +2043,17 @@ document.getElementById("d-save").onclick = () => {
   const bucket = document.getElementById("d-bucket").value;
   const location = bucket === MASTER ? MASTER_LOCATION : document.getElementById("d-location").value;
   if (!model){ alert("Model is required."); return; }
+  // Serial number is the one thing that should be unique per physical
+  // device — block adding a duplicate rather than letting it slip in.
+  // Blank/placeholder ("—") serials are exempt since plenty of devices
+  // legitimately don't have one recorded.
+  if (serial && serial !== "—"){
+    const dup = state.devices.find(d => d.serial && d.serial.trim().toLowerCase() === serial.toLowerCase());
+    if (dup){
+      alert(`Serial "${serial}" already belongs to ${dup.model}${dup.tag && dup.tag !== "—" ? " (" + dup.tag + ")" : ""} in ${dup.bucket}${dup.location ? " · " + dup.location : ""}. Serial numbers must be unique — double-check before adding another.`);
+      return;
+    }
+  }
   state.devices.push({ id: Date.now().toString(), tag: tag || "—", model, serial: serial || "—", status, bucket, location, notes: [] });
   save(); render();
   deviceModal.classList.remove("open");
@@ -2305,6 +2327,15 @@ document.getElementById("acc-save").onclick = () => {
   const bucket = document.getElementById("acc-bucket").value;
   const location = bucket === MASTER ? MASTER_LOCATION : document.getElementById("acc-location").value;
   if (!model){ alert("Model / description is required."); return; }
+  // Same serial-uniqueness guard as Add Device — blank serials are exempt
+  // since most accessories don't have one recorded.
+  if (serial){
+    const dup = state.accessories.find(a => a.serial && a.serial.trim().toLowerCase() === serial.toLowerCase());
+    if (dup){
+      alert(`Serial "${serial}" already belongs to ${dup.model}${dup.tag ? " (" + dup.tag + ")" : ""} in ${dup.bucket}${dup.location ? " · " + dup.location : ""}. Serial numbers must be unique — double-check before adding another.`);
+      return;
+    }
+  }
   state.accessories.push({ id: "acc-" + Date.now().toString(), tag, model, serial, status, location, bucket });
   save(); render();
   accessoryModal.classList.remove("open");
