@@ -29,6 +29,8 @@
   header{background:var(--panel);border-bottom:1px solid var(--border);padding:18px 24px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;}
   .eyebrow{font-size:11px;font-weight:700;letter-spacing:.09em;color:var(--c-violet);text-transform:uppercase;margin-bottom:4px;}
   .sync-status{font-size:11.5px;color:var(--sub);margin-top:4px;min-height:14px;}
+  .link-btn{border:none;background:none;padding:0;font:inherit;color:var(--c-violet);cursor:pointer;text-decoration:underline;}
+  .link-btn:hover{color:var(--ink);}
   header h1{font-size:20px;margin:0;font-weight:500;color:var(--ink);}
   .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
   input[type=text]{padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;min-width:180px;font-family:inherit;background:var(--panel);color:var(--ink);}
@@ -248,6 +250,7 @@
     <div class="eyebrow">Hardware Tracker</div>
     <h1>Master Inventory &amp; Project Allocations</h1>
     <div id="syncStatus" class="sync-status"></div>
+    <div id="authStatus" class="sync-status"></div>
   </div>
   <div class="toolbar">
     <input type="text" id="search" placeholder="Search asset tag, model, serial, or tag (e.g. Tablet)...">
@@ -325,6 +328,21 @@
   </footer>
   <footer class="brand">Internal prototype · Centific</footer>
 </main>
+
+<div class="modal-backdrop" id="authGateBackdrop" style="z-index:50;">
+  <div class="modal" style="width:320px;">
+    <h3>Sign in</h3>
+    <div id="auth-login-loading" style="font-size:12.5px;color:var(--sub);margin:-8px 0 12px;">Loading access list…</div>
+    <div id="auth-login-form" style="display:none;">
+      <label>Login</label>
+      <input id="auth-login-input" placeholder="e.g. lesther-DCHW" autocomplete="off">
+      <div id="auth-login-error" style="color:var(--st-broken);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
+      <div class="modal-actions">
+        <button id="auth-login-submit" class="primary" style="width:100%;">Enter</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="modal-backdrop" id="assetChooserBackdrop">
   <div class="modal">
@@ -983,6 +1001,87 @@ function computeFleetFingerprint(data){
   ].join("\n---\n");
 }
 
+// --- Access gate ---
+// Backed by a "Credentials" table in the same workbook (Name / Login / Role),
+// synced down through this same Load flow — no separate flow needed. Login
+// is checked entirely client-side, so this is a soft gate (keeps casual
+// visitors out), not real security: anyone who reads the page source can see
+// the Excel URLs directly. Stays completely inert (never gates anything)
+// until the Credentials table actually has at least one row, so it's safe to
+// ship before that table exists.
+const AUTH_KEY = "hw-tracker-auth-v1";
+let credentialsList = [];
+let authInfo = JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); // { name, login, role } | null
+
+function applyCredentials(rows){
+  credentialsList = (rows || [])
+    .filter(r => r && r.login)
+    .map(r => ({ name: String(r.name || ""), login: String(r.login || "").trim(), role: String(r.role || "") }));
+}
+
+function findCredential(loginInput){
+  const q = String(loginInput || "").trim().toLowerCase();
+  if (!q) return null;
+  return credentialsList.find(c => c.login.toLowerCase() === q) || null;
+}
+
+function authGateActive(){ return credentialsList.length > 0; }
+
+function renderAuthStatus(){
+  const el = document.getElementById("authStatus");
+  if (!el) return;
+  if (authInfo){
+    el.innerHTML = `Logged in as <b>${authInfo.name || authInfo.login}</b>${authInfo.role ? " (" + authInfo.role + ")" : ""} · <button id="logout-btn" class="link-btn">Log out</button>`;
+    const btn = document.getElementById("logout-btn");
+    if (btn) btn.addEventListener("click", () => {
+      localStorage.removeItem(AUTH_KEY);
+      location.reload();
+    });
+  } else {
+    el.textContent = "";
+  }
+}
+
+function showAuthGate(){ document.getElementById("authGateBackdrop").classList.add("open"); }
+function hideAuthGate(){ document.getElementById("authGateBackdrop").classList.remove("open"); }
+
+function attemptLogin(){
+  const input = document.getElementById("auth-login-input");
+  const errEl = document.getElementById("auth-login-error");
+  const match = findCredential(input.value);
+  if (!match){
+    errEl.textContent = "Login not recognized — check with an admin if this seems wrong.";
+    return;
+  }
+  authInfo = match;
+  localStorage.setItem(AUTH_KEY, JSON.stringify(authInfo));
+  errEl.textContent = "";
+  input.value = "";
+  hideAuthGate();
+  renderAuthStatus();
+}
+document.getElementById("auth-login-submit").addEventListener("click", attemptLogin);
+document.getElementById("auth-login-input").addEventListener("keydown", e => { if (e.key === "Enter") attemptLogin(); });
+
+// Called every time fresh credentials arrive (initial load, periodic refresh,
+// or refocus refresh) — decides whether the gate should be showing at all,
+// and re-checks a remembered login in case access was since revoked.
+function evaluateAuthGate(){
+  if (!authGateActive()){
+    hideAuthGate();
+    return;
+  }
+  document.getElementById("auth-login-loading").style.display = "none";
+  document.getElementById("auth-login-form").style.display = "";
+  if (authInfo && !findCredential(authInfo.login)){
+    // Remembered login no longer matches anything in the Credentials table.
+    authInfo = null;
+    localStorage.removeItem(AUTH_KEY);
+    renderAuthStatus();
+  }
+  if (!authInfo) showAuthGate(); else hideAuthGate();
+}
+
 async function loadFromExcel(){
   setSyncStatus("Loading shared data from Excel…");
   try {
@@ -990,6 +1089,8 @@ async function loadFromExcel(){
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
     lastLoadSnapshot = computeFleetFingerprint(data);
+    applyCredentials(data.credentials || []);
+    evaluateAuthGate();
     mergeRemoteProjects(data.projects || []);
     mergeRemoteLocations(data.locations || []);
     mergeRemoteDevices(data.devices || []);
@@ -2701,6 +2802,14 @@ document.getElementById("themeToggle").addEventListener("click", () => {
   applyTheme(current === "dark" ? "light" : "dark");
 });
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
+
+// If there's no remembered login yet, block behind the sign-in screen right
+// away (showing a "loading access list" state) until the first Excel load
+// tells us whether the gate is even configured. If there IS a remembered
+// login, skip straight to the app — evaluateAuthGate() will double-check it's
+// still valid once the fresh credentials list arrives.
+renderAuthStatus();
+if (!authInfo) showAuthGate();
 
 render(); // render immediately from local cache so the page isn't blank while Excel loads
 loadFromExcel();
