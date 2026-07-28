@@ -101,6 +101,12 @@
   .tab-add-btn{margin-left:auto;border:1px solid var(--c-violet);color:var(--c-violet);background:var(--c-violet-soft);font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;}
   .tab-add-btn:hover{filter:brightness(0.97);}
 
+  /* Static section labels replacing the old per-card clickable tabs — the
+     Hardware/Accessories/All choice is now made once, globally, in the
+     "Availability by model" panel below, and applied everywhere. */
+  .section-head{display:flex;align-items:center;gap:8px;padding:10px 16px 6px;font-size:12.5px;font-weight:700;color:var(--sub);border-top:1px solid var(--border);margin-top:4px;}
+  .section-head.compact{padding:8px 12px 4px;font-size:11.5px;}
+
   .archived-panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:14px;}
   .archived-panel-head{padding:10px 16px;font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);background:var(--hover-bg);display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
   .archived-panel-head:hover{color:var(--ink);}
@@ -272,7 +278,9 @@
     <div class="panel-tabs" id="summary-tabs" style="padding:0 0 8px;border-bottom:none;margin-bottom:4px;">
       <button class="tab-btn" data-summary-tab="hardware">🖥 Hardware</button>
       <button class="tab-btn" data-summary-tab="accessories">🎒 Accessories</button>
+      <button class="tab-btn" data-summary-tab="all">📋 All</button>
     </div>
+    <div class="qm-hint" style="margin:-4px 0 10px;">This switch controls what shows here <b>and</b> in every project card and Master Inventory below.</div>
     <div class="model-table-wrap" id="hw-model-table-wrap">
       <table class="model-table">
         <thead>
@@ -304,9 +312,9 @@
   </aside>
 
   <footer class="note">
-    Devices and Accessories now sync to a shared Excel workbook via Power Automate, so changes made by anyone
-    show up for everyone. Projects, locations, tags, and device notes are still local to each browser for now —
-    a possible next step if this keeps growing.
+    Devices, Accessories, Projects, Locations, tags, and device notes all sync to a shared Excel workbook via
+    Power Automate, so changes made by anyone show up for everyone. Your view mode (Hardware/Accessories/All),
+    pinned project, and minimized cards stay local to each browser.
   </footer>
   <footer class="brand">Internal prototype · Centific</footer>
 </main>
@@ -742,7 +750,6 @@ function seed(){
     archivedCollapsed: false,
     locations: { [MASTER]: [], "Project Alpha": [], "Project Beta": [] },
     accessories: [],
-    accTab: {},
     modelTags: {}
   };
 }
@@ -762,8 +769,7 @@ function normalizeState(){
     if (typeof d.location !== "string") d.location = "";
   });
   if (!state.accessories) state.accessories = [];
-  if (!state.accTab) state.accTab = {};
-  // Locations are now shared between the Hardware and Accessories tabs of a
+  // Locations are now shared between the Hardware and Accessories sections of a
   // project. Migrate anything from the older, separate per-tab accessory
   // location list (if this browser still has one saved) into the shared list.
   if (state.accLocations){
@@ -775,9 +781,6 @@ function normalizeState(){
     });
     delete state.accLocations;
   }
-  state.buckets.forEach(b => {
-    if (!state.accTab[b]) state.accTab[b] = "hardware";
-  });
   state.accessories.forEach(a => {
     if (typeof a.tag !== "string") a.tag = "";
     if (typeof a.serial !== "string") a.serial = "";
@@ -785,7 +788,14 @@ function normalizeState(){
     if (!a.status) a.status = "instock";
     if (typeof a.bucket !== "string" || !state.buckets.includes(a.bucket)) a.bucket = MASTER;
   });
-  if (state.summaryTab !== "hardware" && state.summaryTab !== "accessories") state.summaryTab = "hardware";
+  // Single global switch (Hardware / Accessories / All) — replaces the old
+  // per-project accTab. Set once here, applied to every project card and
+  // Master Inventory, plus the Availability-by-model summary below.
+  if (state.viewMode !== "hardware" && state.viewMode !== "accessories" && state.viewMode !== "all"){
+    state.viewMode = (state.summaryTab === "accessories") ? "accessories" : "hardware";
+  }
+  delete state.summaryTab;
+  delete state.accTab;
   if (!state.modelTags) state.modelTags = {};
 }
 
@@ -814,7 +824,6 @@ function ensureBucketExists(bucket){
     state.buckets.push(bucket);
   }
   if (!state.locations[bucket]) state.locations[bucket] = [];
-  if (!state.accTab[bucket]) state.accTab[bucket] = "hardware";
 }
 
 // Notes format in the "notes" column: one note per line, each line "ts: text".
@@ -891,7 +900,6 @@ function mergeRemoteProjects(rows){
   state.archived = archived;
   state.buckets.forEach(b => {
     if (!state.locations[b]) state.locations[b] = [];
-    if (!state.accTab[b]) state.accTab[b] = "hardware";
   });
   if (!state.buckets.includes(state.featured)) state.featured = MASTER;
   state.minimized = state.minimized.filter(b => state.buckets.includes(b));
@@ -1206,18 +1214,9 @@ function wireHeadButtons(container){
   });
 }
 
-// Switches a panel between its Hardware and Accessories tab, and wires the
-// "+ Accessory" button that only shows up while the Accessories tab is active.
-function wireTabButtons(container){
-  container.querySelectorAll(".tab-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const bucket = btn.getAttribute("data-bucket");
-      const tab = btn.getAttribute("data-tab");
-      state.accTab[bucket] = tab;
-      save();
-      render();
-    });
-  });
+// Wires the "+ Accessory" quick-add button that shows next to a card's
+// Accessories section header whenever that section is visible.
+function wireQuickAddButtons(container){
   container.querySelectorAll(".tab-add-btn").forEach(btn => {
     btn.addEventListener("click", () => openAddAccessoryModal(btn.getAttribute("data-bucket")));
   });
@@ -1422,16 +1421,22 @@ function render(){
   const mainIsMaster = mainBucket === MASTER;
   const sidebarBuckets = state.buckets.filter(b => b !== mainBucket);
 
+  // Global view mode (Hardware / Accessories / All) — chosen once, in
+  // "Availability by model", and applied to every project card and Master
+  // Inventory at once. Replaces the old per-project accTab toggle.
+  const viewMode = state.viewMode || "hardware";
+  const showHW = viewMode !== "accessories";
+  const showAcc = viewMode !== "hardware";
+
   // Main (pinned / featured) panel — always the big one on the left
   const mainEl = document.getElementById("main-panel");
   const mainDevices = sortDevices(state.devices.filter(d => d.bucket === mainBucket && matchesQuery(d, q)));
   const mainAccessories = sortAccessories(state.accessories.filter(a => a.bucket === mainBucket && matchesQuery(a, q)));
   // Hardware location grouping stays project-only (Master never groups its hardware).
-  // Locations themselves are shared per bucket across both tabs, so Master's
-  // Accessories tab can still have its own locations without affecting Master's Hardware tab.
+  // Locations themselves are shared per bucket across both sections, so Master's
+  // Accessories section can still have its own locations without affecting Master's Hardware section.
   const mainHasLocs = !mainIsMaster && (state.locations[mainBucket] || []).length > 0;
   const mainAccLocs = state.locations[mainBucket] || [];
-  const mainTab = state.accTab[mainBucket] || "hardware";
   mainEl.innerHTML = `
     <div class="panel-head">
       <div>
@@ -1441,44 +1446,37 @@ function render(){
       <div class="head-actions">
         <button class="icon-btn settings-btn" data-bucket="${mainBucket}" title="Project settings">⚙</button>
         ${mainIsMaster ? "" : `<button class="pin-btn unpin" data-bucket="${MASTER}">↩ Return Master to main</button>`}
-        <span class="count-pill">${mainTab === "accessories" ? mainAccessories.length : mainDevices.length}</span>
       </div>
     </div>
-    <div class="panel-tabs">
-      <button class="tab-btn ${mainTab==="hardware"?"active":""}" data-bucket="${mainBucket}" data-tab="hardware">🖥 Hardware <span class="tab-count">${mainDevices.length}</span></button>
-      <button class="tab-btn ${mainTab==="accessories"?"active":""}" data-bucket="${mainBucket}" data-tab="accessories">🎒 Accessories <span class="tab-count">${mainAccessories.length}</span></button>
-      ${mainTab === "accessories" ? `<button class="tab-add-btn" data-bucket="${mainBucket}">+ Accessory</button>` : ""}
-    </div>
-    ${mainTab === "hardware" ? `
+    ${showHW ? `
+      <div class="section-head">🖥 Hardware <span class="tab-count">${mainDevices.length}</span></div>
       <div class="drop-target" data-bucket="${mainBucket}" data-kind="hardware">⬇ Drop hardware here to move into ${mainBucket}</div>
       <div class="col-labels full${mainHasLocs ? " loc" : ""}"><span></span>${sortLabel("serial","Serial")}${sortLabel("tag","Tag")}${sortLabel("model","Model")}${sortLabel("status","Status")}${mainHasLocs ? "<span>Location</span>" : ""}</div>
       <div class="rows-list" id="main-rows"></div>
-    ` : `
+    ` : ""}
+    ${showAcc ? `
+      <div class="section-head">🎒 Accessories <span class="tab-count">${mainAccessories.length}</span><button class="tab-add-btn" data-bucket="${mainBucket}">+ Accessory</button></div>
       <div class="drop-target" data-bucket="${mainBucket}" data-kind="accessory">⬇ Drop an accessory here to move into ${mainBucket}</div>
       <div class="col-labels acc full"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Location</span><span></span></div>
       <div class="rows-list" id="main-acc-rows"></div>
-    `}
+    ` : ""}
   `;
-  if (mainTab === "hardware"){
-    renderBucketRows(document.getElementById("main-rows"), mainBucket, mainDevices, false);
-  } else {
-    renderAccessoryRows(document.getElementById("main-acc-rows"), mainAccessories, mainAccLocs, false, mainBucket);
-  }
+  if (showHW) renderBucketRows(document.getElementById("main-rows"), mainBucket, mainDevices, false);
+  if (showAcc) renderAccessoryRows(document.getElementById("main-acc-rows"), mainAccessories, mainAccLocs, false, mainBucket);
   wirePinButtons(mainEl);
   wireHeadButtons(mainEl);
   wireSortHeaders(mainEl);
   wireAccSortHeaders(mainEl);
-  wireTabButtons(mainEl);
+  wireQuickAddButtons(mainEl);
 
   // Sidebar — archived projects header first, then everything not currently pinned to main
   const sidebarEl = document.getElementById("sidebar-panel");
   sidebarEl.innerHTML = archivedSectionHTML() + sidebarBuckets.map(b => {
     const isMaster = b === MASTER;
     const isMin = state.minimized.includes(b);
-    const tab = state.accTab[b] || "hardware";
     const count = state.devices.filter(d => d.bucket === b && matchesQuery(d, q)).length;
     const accCount = state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)).length;
-    // Hardware location grouping stays project-only; locations are shared per bucket across tabs.
+    // Hardware location grouping stays project-only; locations are shared per bucket across sections.
     const bHasLocs = !isMaster && (state.locations[b] || []).length > 0;
     return `
       <div class="mini-card${isMin ? " minimized" : ""}" data-bucket="${b}" draggable="true">
@@ -1491,37 +1489,38 @@ function render(){
             <button class="icon-btn minimize-btn" data-bucket="${b}" title="${isMin ? "Expand" : "Minimize"}">${isMin ? "▸" : "▾"}</button>
             <button class="icon-btn settings-btn" data-bucket="${b}" title="Project settings">⚙</button>
             <button class="pin-btn" data-bucket="${b}">📌 Pin to main</button>
-            <span class="count-pill">${tab === "accessories" ? accCount : count}</span>
           </div>
         </div>
-        <div class="panel-tabs">
-          <button class="tab-btn ${tab==="hardware"?"active":""}" data-bucket="${b}" data-tab="hardware">🖥 <span class="tab-count">${count}</span></button>
-          <button class="tab-btn ${tab==="accessories"?"active":""}" data-bucket="${b}" data-tab="accessories">🎒 <span class="tab-count">${accCount}</span></button>
-          ${tab === "accessories" ? `<button class="tab-add-btn" data-bucket="${b}">+</button>` : ""}
-        </div>
-        ${tab === "hardware" ? `
+        ${showHW ? `
+          <div class="section-head compact">🖥 <span class="tab-count">${count}</span></div>
           <div class="drop-target" data-bucket="${b}" data-kind="hardware">⬇ Drop hardware here</div>
           <div class="col-labels compact${bHasLocs ? " loc" : ""}"><span></span>${sortLabel("serial","Serial")}${sortLabel("tag","Tag")}${sortLabel("status","Status")}${bHasLocs ? "<span>Location</span>" : ""}</div>
-          <div class="rows-list" data-bucket="${b}"></div>
-        ` : `
+          <div class="rows-list" data-bucket="${b}" data-kind="hardware"></div>
+        ` : ""}
+        ${showAcc ? `
+          <div class="section-head compact">🎒 <span class="tab-count">${accCount}</span><button class="tab-add-btn" data-bucket="${b}">+</button></div>
           <div class="drop-target" data-bucket="${b}" data-kind="accessory">⬇ Drop an accessory here</div>
           <div class="col-labels acc compact"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("status","Status")}<span>Loc</span><span></span></div>
-          <div class="rows-list" data-bucket="${b}"></div>
-        `}
+          <div class="rows-list" data-bucket="${b}" data-kind="accessory"></div>
+        ` : ""}
       </div>
     `;
   }).join("");
 
   sidebarBuckets.forEach(b => {
-    const container = sidebarEl.querySelector(`.rows-list[data-bucket="${CSS.escape(b)}"]`);
-    if (!container) return;
-    const tab = state.accTab[b] || "hardware";
-    if (tab === "hardware"){
-      const devices = sortDevices(state.devices.filter(d => d.bucket === b && matchesQuery(d, q)));
-      renderBucketRows(container, b, devices, true);
-    } else {
-      const accessories = sortAccessories(state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)));
-      renderAccessoryRows(container, accessories, state.locations[b] || [], true, b);
+    if (showHW){
+      const hwContainer = sidebarEl.querySelector(`.rows-list[data-bucket="${CSS.escape(b)}"][data-kind="hardware"]`);
+      if (hwContainer){
+        const devices = sortDevices(state.devices.filter(d => d.bucket === b && matchesQuery(d, q)));
+        renderBucketRows(hwContainer, b, devices, true);
+      }
+    }
+    if (showAcc){
+      const accContainer = sidebarEl.querySelector(`.rows-list[data-bucket="${CSS.escape(b)}"][data-kind="accessory"]`);
+      if (accContainer){
+        const accessories = sortAccessories(state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)));
+        renderAccessoryRows(accContainer, accessories, state.locations[b] || [], true, b);
+      }
     }
   });
   wirePinButtons(sidebarEl);
@@ -1529,7 +1528,7 @@ function render(){
   wireCardDrag(sidebarEl);
   wireSortHeaders(sidebarEl);
   wireAccSortHeaders(sidebarEl);
-  wireTabButtons(sidebarEl);
+  wireQuickAddButtons(sidebarEl);
   sidebarEl.querySelectorAll(".restore-btn").forEach(btn => {
     btn.addEventListener("click", () => restoreProject(btn.getAttribute("data-name")));
   });
@@ -1573,11 +1572,13 @@ function archivedSectionHTML(){
 }
 
 function renderModelSummary(){
+  const mode = state.viewMode || "hardware";
   document.querySelectorAll("#summary-tabs .tab-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.getAttribute("data-summary-tab") === state.summaryTab);
+    btn.classList.toggle("active", btn.getAttribute("data-summary-tab") === mode);
   });
-  document.getElementById("hw-model-table-wrap").style.display = state.summaryTab === "hardware" ? "" : "none";
-  document.getElementById("acc-model-table-wrap").style.display = state.summaryTab === "accessories" ? "" : "none";
+  document.getElementById("hw-model-table-wrap").style.display = (mode === "hardware" || mode === "all") ? "" : "none";
+  document.getElementById("acc-model-table-wrap").style.display = (mode === "accessories" || mode === "all") ? "" : "none";
+  document.getElementById("acc-model-table-wrap").style.marginTop = (mode === "all") ? "18px" : "0";
 
   renderHardwareModelTable();
   renderAccessoryModelTable();
@@ -1935,12 +1936,14 @@ function renderLog(){
 // Search
 document.getElementById("search").addEventListener("input", render);
 
-// Availability-by-model tab toggle (Hardware vs Accessories). The buttons
-// live in static HTML, so they're wired once here rather than re-wired on
-// every render() — renderModelSummary() just toggles their "active" class.
+// Global Hardware / Accessories / All switch, in "Availability by model".
+// Drives that summary table AND every project card + Master Inventory below.
+// The buttons live in static HTML, so they're wired once here rather than
+// re-wired on every render() — renderModelSummary() just toggles their
+// "active" class.
 document.querySelectorAll("#summary-tabs .tab-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    state.summaryTab = btn.getAttribute("data-summary-tab");
+    state.viewMode = btn.getAttribute("data-summary-tab");
     save();
     render();
   });
@@ -2006,7 +2009,6 @@ document.getElementById("p-save").onclick = () => {
   if (state.buckets.includes(name)){ alert("That project already exists."); return; }
   state.buckets.push(name);
   state.locations[name] = [startingLocation];
-  state.accTab[name] = "hardware";
   save(); render();
   projectModal.classList.remove("open");
   document.getElementById("p-name").value = "";
@@ -2055,7 +2057,7 @@ function openDeleteLocationConfirm(bucket, name){
     if (devCount) parts.push(`${devCount} device${devCount===1?"":"s"}`);
     if (accCount) parts.push(`${accCount} accessor${accCount===1?"y":"ies"}`);
     document.getElementById("delete-location-message").innerHTML =
-      `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from both the Hardware and Accessories tabs.` +
+      `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from both Hardware and Accessories.` +
       (parts.length ? `<br><br>${parts.join(" and ")} there will move back to Unassigned.` : "");
     okBtn.style.display = "";
     cancelBtn.textContent = "Cancel";
@@ -2146,16 +2148,14 @@ document.getElementById("settings-archive-btn").onclick = () => {
 };
 
 // Renames a bucket everywhere it's used as a key: the buckets list, its
-// locations, its Hardware/Accessories tab state, minimized/featured
-// tracking, and every device/accessory currently assigned to it.
+// locations, minimized/featured tracking, and every device/accessory
+// currently assigned to it.
 function renameBucket(oldName, newName){
   const idx = state.buckets.indexOf(oldName);
   if (idx === -1) return;
   state.buckets[idx] = newName;
   state.locations[newName] = state.locations[oldName] || [];
   delete state.locations[oldName];
-  state.accTab[newName] = state.accTab[oldName] || "hardware";
-  delete state.accTab[oldName];
   const minIdx = state.minimized.indexOf(oldName);
   if (minIdx >= 0) state.minimized[minIdx] = newName;
   if (state.featured === oldName) state.featured = newName;
@@ -2198,10 +2198,6 @@ function renameArchivedProject(oldName, newName){
     state.locations[newName] = state.locations[oldName];
     delete state.locations[oldName];
   }
-  if (state.accTab[oldName]){
-    state.accTab[newName] = state.accTab[oldName];
-    delete state.accTab[oldName];
-  }
   logActivity({ ts: new Date().toLocaleString(), type: "rename", tag: newName, from: oldName, to: newName });
 }
 
@@ -2219,7 +2215,6 @@ document.getElementById("delete-archived-project-ok").onclick = () => {
   const name = archivedSettingsTarget;
   state.archived = state.archived.filter(a => a.name !== name);
   delete state.locations[name];
-  delete state.accTab[name];
   logActivity({ ts: new Date().toLocaleString(), type: "delete-project", tag: name });
   archivedSettingsTarget = null;
   save();
