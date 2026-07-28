@@ -150,8 +150,11 @@
   .col-labels.compact,.row.compact{grid-template-columns:18px minmax(50px,1fr) minmax(60px,1.2fr) 100px;}
   .col-labels.full.loc,.row.full.loc{grid-template-columns:20px minmax(50px,0.9fr) minmax(60px,1.1fr) minmax(60px,1.1fr) 106px minmax(90px,0.9fr);}
   .col-labels.compact.loc,.row.compact.loc{grid-template-columns:18px minmax(45px,0.9fr) minmax(55px,1fr) 96px minmax(85px,0.9fr);}
-  .col-labels.acc.full,.row.acc.full{grid-template-columns:20px minmax(60px,1fr) minmax(50px,0.8fr) minmax(80px,1.2fr) 100px minmax(80px,0.9fr) 22px;}
-  .col-labels.acc.compact,.row.acc.compact{grid-template-columns:18px minmax(55px,1fr) minmax(45px,0.8fr) 92px minmax(75px,0.9fr) 22px;}
+  /* Accessories only show Model/Status/Location — Serial and Tag are dropped
+     from this view since they're rarely filled in for accessories (still
+     collected in Add Accessory and shown as a tooltip on hover). */
+  .col-labels.acc.full,.row.acc.full{grid-template-columns:20px minmax(100px,1.6fr) 100px minmax(80px,1fr) 22px;}
+  .col-labels.acc.compact,.row.acc.compact{grid-template-columns:18px minmax(80px,1.5fr) 92px minmax(75px,1fr) 22px;}
   .acc-del-btn{border:none;background:none;color:var(--sub);cursor:pointer;font-size:12px;opacity:.55;padding:0;}
   .acc-del-btn:hover{opacity:1;color:var(--st-broken);}
   .col-labels{display:grid;gap:8px;padding:8px 16px;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);}
@@ -1304,11 +1307,14 @@ function renderBucketRows(containerEl, bucket, devices, compact){
     return;
   }
 
-  // Group devices under their declared location, plus a catch-all
-  // "Unassigned" group for anything with no (or a since-deleted) location.
+  // Group devices under their declared location. Every device should always
+  // have a real location now, but keep a catch-all "Unassigned" group as a
+  // safety net for edge cases — just don't show it when it's empty (the
+  // normal case).
   const known = new Set(locs);
   const groups = locs.map(name => ({ name, devices: devices.filter(d => d.location === name), isUnassigned: false }));
-  groups.push({ name: "Unassigned", devices: devices.filter(d => !known.has(d.location)), isUnassigned: true });
+  const unassignedDevices = devices.filter(d => !known.has(d.location));
+  if (unassignedDevices.length) groups.push({ name: "Unassigned", devices: unassignedDevices, isUnassigned: true });
 
   containerEl.innerHTML = groups.map(g => `
     <div class="loc-group">
@@ -1341,13 +1347,15 @@ function wireDropTarget(container){
 // Accessories tab. Draggable into the green accessory drop box to move
 // between projects. Tag and Serial are optional since these often won't have one.
 function accRowHTML(a, compact, locs){
-  const modelCell = compact ? "" : `<span class="cell sub" title="${a.model}">${a.model}</span>`;
+  // Serial and Tag are collected in Add Accessory but rarely filled in for
+  // accessories, so they're left out of the row and folded into a tooltip
+  // on Model instead — easy to bring back as columns later if that changes.
+  const extra = [a.serial ? `S/N ${a.serial}` : "", a.tag ? `Tag ${a.tag}` : ""].filter(Boolean).join(" · ");
+  const modelTitle = extra ? `${a.model} (${extra})` : a.model;
   return `
     <div class="row acc ${compact ? "compact" : "full"}" draggable="true" data-id="${a.id}">
       <span class="handle">⋮⋮</span>
-      <span class="cell serial" title="${a.serial || "No serial recorded"}">${a.serial || "—"}</span>
-      <span class="cell tag" title="${a.tag || "No tag"}">${a.tag || "—"}</span>
-      ${modelCell}
+      <span class="cell sub" title="${modelTitle}">${a.model}</span>
       <select class="status-select ${a.status}" data-id="${a.id}">
         <option value="instock" ${a.status==="instock"?"selected":""}>In stock</option>
         <option value="inuse" ${a.status==="inuse"?"selected":""}>In use</option>
@@ -1427,7 +1435,8 @@ function renderAccessoryRows(containerEl, accessories, locs, compact, bucket){
 
   const known = new Set(locs);
   const groups = locs.map(name => ({ name, list: accessories.filter(a => a.location === name), isUnassigned: false }));
-  groups.push({ name: "Unassigned", list: accessories.filter(a => !known.has(a.location)), isUnassigned: true });
+  const unassignedAcc = accessories.filter(a => !known.has(a.location));
+  if (unassignedAcc.length) groups.push({ name: "Unassigned", list: unassignedAcc, isUnassigned: true });
 
   containerEl.innerHTML = groups.map(g => `
     <div class="loc-group">
@@ -1488,7 +1497,7 @@ function render(){
     ${showAcc ? `
       <div class="section-head">🎒 Accessories <span class="tab-count">${mainAccessories.length}</span></div>
       <div class="drop-target" data-bucket="${mainBucket}" data-kind="accessory">⬇ Drop an accessory here to move into ${mainBucket}</div>
-      <div class="col-labels acc full"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Location</span><span></span></div>
+      <div class="col-labels acc full"><span></span>${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Location</span><span></span></div>
       <div class="rows-list" id="main-acc-rows"></div>
     ` : ""}
   `;
@@ -1531,7 +1540,7 @@ function render(){
         ${showAcc ? `
           <div class="section-head compact">🎒 <span class="tab-count">${accCount}</span></div>
           <div class="drop-target" data-bucket="${b}" data-kind="accessory">⬇ Drop an accessory here</div>
-          <div class="col-labels acc compact"><span></span>${accSortLabel("serial","Serial")}${accSortLabel("tag","Tag")}${accSortLabel("status","Status")}<span>Loc</span><span></span></div>
+          <div class="col-labels acc compact"><span></span>${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Loc</span><span></span></div>
           <div class="rows-list" data-bucket="${b}" data-kind="accessory"></div>
         ` : ""}
       </div>
