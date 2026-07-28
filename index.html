@@ -475,6 +475,21 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="syncConflictBackdrop">
+  <div class="modal">
+    <h3>Someone else made changes</h3>
+    <div style="font-size:13px;color:var(--sub);line-height:1.55;">
+      This data has changed in Excel since this page last loaded it — most likely someone else saved a change while
+      this was open. To avoid overwriting their update, your most recent change here hasn't been saved yet.
+      <br><br>
+      Reload to pick up the latest data, then redo your last change if it's not already reflected.
+    </div>
+    <div class="modal-actions">
+      <button id="sync-conflict-reload" class="primary" style="width:100%;">Reload now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="locationModalBackdrop">
   <div class="modal">
     <h3>Add location</h3>
@@ -947,12 +962,18 @@ function mergeRemoteLocations(rows){
   state.buckets.forEach(b => { state.locations[b] = byBucket[b] || []; });
 }
 
+// Raw JSON text from the most recent successful Excel load — kept so a save
+// can check whether Excel has changed since this session last saw it.
+let lastLoadSnapshot = null;
+
 async function loadFromExcel(){
   setSyncStatus("Loading shared data from Excel…");
   try {
     const res = await fetch(EXCEL_LOAD_URL);
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
+    const rawText = await res.text();
+    lastLoadSnapshot = rawText;
+    const data = JSON.parse(rawText);
     mergeRemoteProjects(data.projects || []);
     mergeRemoteLocations(data.locations || []);
     mergeRemoteDevices(data.devices || []);
@@ -971,9 +992,38 @@ async function loadFromExcel(){
 }
 
 let pushTimer = null;
+let saveInFlight = false;
+
 function pushToExcel(){
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
+    pushTimer = null;
+    doPushToExcel();
+  }, 400);
+}
+
+async function doPushToExcel(){
+  saveInFlight = true;
+  try {
+    // Conflict guard: if Excel has changed since this session last loaded
+    // it, don't blindly overwrite whatever someone else just saved — this
+    // is what let a stale background tab silently wipe out newly-added
+    // equipment before. Block the save and make the user reload first.
+    setSyncStatus("Checking for changes before saving…");
+    try {
+      const checkRes = await fetch(EXCEL_LOAD_URL);
+      if (checkRes.ok){
+        const freshText = await checkRes.text();
+        if (lastLoadSnapshot !== null && freshText !== lastLoadSnapshot){
+          setSyncStatus("Couldn't save — someone else made changes");
+          showSyncConflictModal();
+          return;
+        }
+      }
+    } catch (err){
+      console.error("Conflict check failed, saving anyway:", err);
+    }
+
     setSyncStatus("Saving to Excel…");
 
     const projectsPayload = [
@@ -986,33 +1036,64 @@ function pushToExcel(){
       (state.locations[bucket] || []).forEach(name => locationsPayload.push({ bucket, name }));
     });
 
-    fetch(EXCEL_SAVE_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        devices: state.devices.map(d => ({
-          id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""),
-          status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || ""),
-          tags: (state.modelTags[d.model] || []).join(";"),
-          notes: buildNotesColumn(d.notes)
-        })),
-        accessories: state.accessories.map(a => ({
-          id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""),
-          status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || ""),
-          tags: (state.modelTags[a.model] || []).join(";")
-        })),
-        projects: projectsPayload,
-        locations: locationsPayload
-      })
-    }).then(res => {
+    try {
+      const res = await fetch(EXCEL_SAVE_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          devices: state.devices.map(d => ({
+            id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""),
+            status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || ""),
+            tags: (state.modelTags[d.model] || []).join(";"),
+            notes: buildNotesColumn(d.notes)
+          })),
+          accessories: state.accessories.map(a => ({
+            id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""),
+            status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || ""),
+            tags: (state.modelTags[a.model] || []).join(";")
+          })),
+          projects: projectsPayload,
+          locations: locationsPayload
+        })
+      });
       if (!res.ok) throw new Error("HTTP " + res.status);
       setSyncStatus("Saved to Excel");
-    }).catch(err => {
+      // Excel now reflects our own write — refresh the snapshot baseline (and
+      // pick up any server-side value changes) so the next save's conflict
+      // check compares against the truth, not the pre-save snapshot.
+      await loadFromExcel();
+    } catch (err){
       console.error("Excel save failed:", err);
       setSyncStatus("Couldn't save to Excel — change kept locally only");
-    });
-  }, 400);
+    }
+  } finally {
+    saveInFlight = false;
+  }
 }
+
+// Keeps everyone's view close to current when multiple people have this open
+// at once. Skipped while the tab is hidden (no point spending a request on a
+// screen nobody's looking at) and skipped whenever there's a local edit
+// about to be pushed or currently being pushed, so an incoming refresh can
+// never clobber an in-flight change.
+function autoRefreshIfSafe(){
+  if (document.visibilityState !== "visible") return;
+  if (pushTimer || saveInFlight) return;
+  loadFromExcel();
+}
+setInterval(autoRefreshIfSafe, 25000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") autoRefreshIfSafe();
+});
+
+const syncConflictModal = document.getElementById("syncConflictBackdrop");
+function showSyncConflictModal(){
+  syncConflictModal.classList.add("open");
+}
+document.getElementById("sync-conflict-reload").onclick = () => {
+  syncConflictModal.classList.remove("open");
+  loadFromExcel();
+};
 
 function statusLabel(s){ return s === "instock" ? "In stock" : s === "inuse" ? "In use" : "Broken"; }
 
