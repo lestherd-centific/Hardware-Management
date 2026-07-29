@@ -1292,32 +1292,45 @@ async function doPushToExcel(){
       (state.locations[bucket] || []).forEach(name => locationsPayload.push({ bucket, name }));
     });
 
+    const outgoingDevices = state.devices.map(d => ({
+      id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""),
+      status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || ""),
+      tags: (state.modelTags[d.model] || []).join(";"),
+      notes: buildNotesColumn(d.notes)
+    }));
+    const outgoingAccessories = state.accessories.map(a => ({
+      id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""),
+      status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || ""),
+      tags: (state.modelTags[a.model] || []).join(";")
+    }));
+
     try {
       const res = await fetch(EXCEL_SAVE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          devices: state.devices.map(d => ({
-            id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""),
-            status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || ""),
-            tags: (state.modelTags[d.model] || []).join(";"),
-            notes: buildNotesColumn(d.notes)
-          })),
-          accessories: state.accessories.map(a => ({
-            id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""),
-            status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || ""),
-            tags: (state.modelTags[a.model] || []).join(";")
-          })),
+          devices: outgoingDevices,
+          accessories: outgoingAccessories,
           projects: projectsPayload,
           locations: locationsPayload
         })
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
       setSyncStatus("Saved to Excel");
-      // Excel now reflects our own write — refresh the snapshot baseline (and
-      // pick up any server-side value changes) so the next save's conflict
-      // check compares against the truth, not the pre-save snapshot.
-      await loadFromExcel();
+      // Trust what we just sent as the new baseline instead of immediately
+      // reading it back. Excel/Power Automate can take a few seconds to make
+      // a just-written change visible to a "List rows" read — reloading right
+      // here risked pulling back a still-stale (pre-save) snapshot and
+      // silently reverting the very edit that was just made, which is what
+      // was happening during a fast run of consecutive status changes. The
+      // regular 25s / refocus refresh will pick up anything Excel-side once
+      // it's actually caught up.
+      lastLoadSnapshot = computeFleetFingerprint({
+        devices: outgoingDevices,
+        accessories: outgoingAccessories,
+        projects: projectsPayload,
+        locations: locationsPayload
+      });
     } catch (err){
       console.error("Excel save failed:", err);
       setSyncStatus("Couldn't save to Excel — change kept locally only");
