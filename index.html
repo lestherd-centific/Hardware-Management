@@ -1229,13 +1229,31 @@ async function loadFromExcel(){
 
 let pushTimer = null;
 let saveInFlight = false;
+// True while a second save came in before the first one finished its full
+// check → save → reload cycle. Rather than letting it run concurrently
+// (which would compare against a lastLoadSnapshot the first call hasn't
+// refreshed yet, and falsely see its own still-in-progress sibling as
+// "someone else's change" — exactly what was spamming the conflict popup
+// during a run of quick consecutive edits), it waits and runs once the
+// first call is completely done.
+let saveQueued = false;
+// True while the hard-block "someone else made changes" popup is showing.
+// Queued saves are dropped (not retried) while this is up, since retrying
+// would just hit the same stale snapshot again — the user has to reload first.
+let conflictBlocked = false;
 
 function pushToExcel(){
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
     pushTimer = null;
-    doPushToExcel();
+    runPush();
   }, 400);
+}
+
+function runPush(){
+  if (conflictBlocked) return;
+  if (saveInFlight){ saveQueued = true; return; }
+  doPushToExcel();
 }
 
 async function doPushToExcel(){
@@ -1253,6 +1271,7 @@ async function doPushToExcel(){
         const freshFingerprint = computeFleetFingerprint(freshData);
         if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot){
           setSyncStatus("Couldn't save — someone else made changes");
+          conflictBlocked = true;
           showSyncConflictModal();
           return;
         }
@@ -1305,6 +1324,16 @@ async function doPushToExcel(){
     }
   } finally {
     saveInFlight = false;
+    // A save came in while this one was still running — run it now that
+    // lastLoadSnapshot is fresh, rather than skipping it entirely. Not done
+    // if we just hit a real conflict: the user needs to reload before any
+    // further save attempt makes sense.
+    if (saveQueued && !conflictBlocked){
+      saveQueued = false;
+      runPush();
+    } else {
+      saveQueued = false;
+    }
   }
 }
 
@@ -1315,7 +1344,7 @@ async function doPushToExcel(){
 // never clobber an in-flight change.
 function autoRefreshIfSafe(){
   if (document.visibilityState !== "visible") return;
-  if (pushTimer || saveInFlight) return;
+  if (pushTimer || saveInFlight || saveQueued || conflictBlocked) return;
   loadFromExcel();
 }
 setInterval(autoRefreshIfSafe, 25000);
@@ -1329,6 +1358,7 @@ function showSyncConflictModal(){
 }
 document.getElementById("sync-conflict-reload").onclick = () => {
   syncConflictModal.classList.remove("open");
+  conflictBlocked = false;
   loadFromExcel();
 };
 
