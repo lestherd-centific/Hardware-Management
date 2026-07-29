@@ -1024,9 +1024,36 @@ function collectModelTags(rows, into){
   });
 }
 
+// Tracks devices/accessories that were just edited in THIS browser, so an
+// incoming Excel read (from the conflict check, the periodic/refocus
+// refresh, or anything else) can't silently revert one mid-flight. Excel/
+// Power Automate can take a little while after a save before a subsequent
+// "List rows" read reflects it — without this, a read that lands in that
+// window looks like ground truth and stomps the edit right back to its old
+// value, which is what was happening during a fast run of status changes.
+let recentEdits = {}; // id -> timestamp (ms) of the most recent local edit
+const EDIT_GRACE_MS = 15000; // comfortably longer than a full check+save round trip
+
+function markEdited(id){
+  recentEdits[id] = Date.now();
+  // Housekeeping: drop anything old enough that it can't matter anymore.
+  const cutoff = Date.now() - EDIT_GRACE_MS;
+  Object.keys(recentEdits).forEach(k => { if (recentEdits[k] < cutoff) delete recentEdits[k]; });
+}
+function recentlyEditedLocally(id){
+  const t = recentEdits[id];
+  return !!t && (Date.now() - t) < EDIT_GRACE_MS;
+}
+
 function mergeRemoteDevices(rows){
+  const byId = {};
+  state.devices.forEach(d => { byId[d.id] = d; });
   state.devices = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
     const id = String(r.id || (Date.now().toString() + Math.random().toString(36).slice(2)));
+    // A very recent local edit to this device may not be reflected in this
+    // read yet — keep the local version rather than risk quietly reverting
+    // a change that's still catching up on the Excel side.
+    if (byId[id] && recentlyEditedLocally(id)) return byId[id];
     const bucket = String(r.bucket || MASTER);
     ensureBucketExists(bucket);
     return {
@@ -1043,11 +1070,15 @@ function mergeRemoteDevices(rows){
 }
 
 function mergeRemoteAccessories(rows){
+  const byId = {};
+  state.accessories.forEach(a => { byId[a.id] = a; });
   state.accessories = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
+    const id = String(r.id || ("acc-" + Date.now().toString() + Math.random().toString(36).slice(2)));
+    if (byId[id] && recentlyEditedLocally(id)) return byId[id];
     const bucket = String(r.bucket || MASTER);
     ensureBucketExists(bucket);
     return {
-      id: String(r.id || ("acc-" + Date.now().toString() + Math.random().toString(36).slice(2))),
+      id,
       tag: String(r.tag || ""),
       model: String(r.model || ""),
       serial: String(r.serial || ""),
@@ -1751,6 +1782,7 @@ function updateAccessoryStatus(id, newStatus){
   const a = state.accessories.find(x => x.id === id);
   if (!a || a.status === newStatus) return;
   a.status = newStatus;
+  markEdited(id);
   save();
   render();
 }
@@ -1759,6 +1791,7 @@ function updateAccessoryLocation(id, newLoc){
   const a = state.accessories.find(x => x.id === id);
   if (!a || a.location === newLoc) return;
   a.location = newLoc;
+  markEdited(id);
   save();
   render();
 }
@@ -1771,6 +1804,7 @@ function moveAccessory(id, bucket){
   // project's first location (Master always uses MASTER_LOCATION) rather
   // than leaving it Unassigned.
   a.location = bucket === MASTER ? MASTER_LOCATION : ((state.locations[bucket] || [])[0] || "");
+  markEdited(id);
   save();
   render();
 }
@@ -2200,6 +2234,7 @@ function dropInto(id, bucket, location){
   const from = d.bucket;
   d.bucket = bucket;
   d.location = bucket === MASTER ? MASTER_LOCATION : (location || (state.locations[bucket] || [])[0] || "");
+  markEdited(id);
   logActivity({ ts: new Date().toLocaleString(), type: "move", tag: d.serial, deviceId: d.id, from, to: bucket });
   save();
   render();
@@ -2210,6 +2245,7 @@ function updateStatus(id, newStatus){
   if (!d || d.status === newStatus) return;
   const from = d.status;
   d.status = newStatus;
+  markEdited(id);
   // Toggling between In stock and In use happens constantly and just spams
   // the activity feed with noise — only log a status change when broken-ness
   // is involved (either direction), since that's the one that actually matters.
@@ -2225,6 +2261,7 @@ function updateLocation(id, newLoc){
   if (!d || d.location === newLoc) return;
   const from = d.location || "Unassigned";
   d.location = newLoc;
+  markEdited(id);
   logActivity({ ts: new Date().toLocaleString(), type: "location", tag: d.serial, deviceId: d.id, from, to: newLoc || "Unassigned" });
   save();
   render();
