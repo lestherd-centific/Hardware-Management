@@ -1273,6 +1273,19 @@ let saveQueued = false;
 // would just hit the same stale snapshot again — the user has to reload first.
 let conflictBlocked = false;
 
+// When our own last successful save completed. Used to skip the conflict
+// check for a little while afterward — Excel/Power Automate can take several
+// seconds before a "List rows" read reflects a write that was just made, so a
+// conflict check run against our OWN still-settling write would misread it as
+// someone else's change and silently block every edit after the first one
+// during a fast run of updates (exactly what a "6 devices marked broken, only
+// 1 stuck" report looks like: saves 2-6 all saw a stale read, treated it as a
+// conflict, and dropped without saving). Once this much time has passed since
+// our last write, Excel should genuinely be caught up, so it's safe to trust
+// a mismatch as a real external change again.
+let lastSaveCompletedAt = 0;
+const SAVE_SETTLE_MS = 15000;
+
 function pushToExcel(){
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
@@ -1294,21 +1307,23 @@ async function doPushToExcel(){
     // it, don't blindly overwrite whatever someone else just saved — this
     // is what let a stale background tab silently wipe out newly-added
     // equipment before. Block the save and make the user reload first.
-    setSyncStatus("Checking for changes before saving…");
-    try {
-      const checkRes = await fetch(EXCEL_LOAD_URL);
-      if (checkRes.ok){
-        const freshData = await checkRes.json();
-        const freshFingerprint = computeFleetFingerprint(freshData);
-        if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot){
-          setSyncStatus("Couldn't save — someone else made changes");
-          conflictBlocked = true;
-          showSyncConflictModal();
-          return;
+    if (Date.now() - lastSaveCompletedAt > SAVE_SETTLE_MS){
+      setSyncStatus("Checking for changes before saving…");
+      try {
+        const checkRes = await fetch(EXCEL_LOAD_URL);
+        if (checkRes.ok){
+          const freshData = await checkRes.json();
+          const freshFingerprint = computeFleetFingerprint(freshData);
+          if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot){
+            setSyncStatus("Couldn't save — someone else made changes");
+            conflictBlocked = true;
+            showSyncConflictModal();
+            return;
+          }
         }
+      } catch (err){
+        console.error("Conflict check failed, saving anyway:", err);
       }
-    } catch (err){
-      console.error("Conflict check failed, saving anyway:", err);
     }
 
     setSyncStatus("Saving to Excel…");
@@ -1362,6 +1377,7 @@ async function doPushToExcel(){
         projects: projectsPayload,
         locations: locationsPayload
       });
+      lastSaveCompletedAt = Date.now();
     } catch (err){
       console.error("Excel save failed:", err);
       setSyncStatus("Couldn't save to Excel — change kept locally only");
