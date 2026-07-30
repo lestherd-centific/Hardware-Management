@@ -159,6 +159,15 @@
   .col-labels.acc.compact,.row.acc.compact{grid-template-columns:18px minmax(80px,1.5fr) 92px minmax(75px,1fr) 22px;}
   .acc-del-btn{border:none;background:none;color:var(--sub);cursor:pointer;font-size:12px;opacity:.55;padding:0;}
   .acc-del-btn:hover{opacity:1;color:var(--st-broken);}
+  /* Props: no drag (quantities split via the Move modal, not drag-drop), so
+     no leading handle column — just Model, Quantity, Move, Delete. */
+  .col-labels.prop.full,.row.prop.full{grid-template-columns:minmax(100px,1.6fr) 90px 70px 22px;cursor:default;}
+  .col-labels.prop.compact,.row.prop.compact{grid-template-columns:minmax(80px,1.5fr) 80px 60px 22px;cursor:default;}
+  .prop-qty-input{width:100%;background:var(--panel);border:1px solid var(--border);border-radius:6px;color:var(--ink);font:inherit;font-size:12px;padding:3px 6px;}
+  .prop-move-btn{border:none;background:none;color:var(--c-violet);cursor:pointer;font-size:11.5px;opacity:.85;padding:0;white-space:nowrap;}
+  .prop-move-btn:hover{opacity:1;text-decoration:underline;}
+  .prop-del-btn{border:none;background:none;color:var(--sub);cursor:pointer;font-size:12px;opacity:.55;padding:0;}
+  .prop-del-btn:hover{opacity:1;color:var(--st-broken);}
   .col-labels{display:grid;gap:8px;padding:8px 16px;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--border);}
   .rows-list{max-height:560px;overflow-y:auto;}
   .rows-list.dragover{background:var(--c-violet-soft);}
@@ -294,9 +303,9 @@
     <div class="panel-tabs" id="summary-tabs" style="padding:0 0 8px;border-bottom:none;margin-bottom:4px;">
       <button class="tab-btn" data-summary-tab="hardware"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><rect x="9" y="9" width="6" height="6" rx="0.5"></rect><line x1="9" y1="2" x2="9" y2="6"></line><line x1="12" y1="2" x2="12" y2="6"></line><line x1="15" y1="2" x2="15" y2="6"></line><line x1="9" y1="18" x2="9" y2="22"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="15" y1="18" x2="15" y2="22"></line><line x1="2" y1="9" x2="6" y2="9"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="2" y1="15" x2="6" y2="15"></line><line x1="18" y1="9" x2="22" y2="9"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="18" y1="15" x2="22" y2="15"></line></svg> Hardware</button>
       <button class="tab-btn" data-summary-tab="accessories">🎒 Accessories</button>
-      <button class="tab-btn" data-summary-tab="all">📋 All</button>
+      <button class="tab-btn" data-summary-tab="props">📦 Props</button>
     </div>
-    <div class="qm-hint" style="margin:-4px 0 10px;">This switch controls what shows here <b>and</b> in every project card and Master Inventory below.</div>
+    <div class="qm-hint" style="margin:-4px 0 10px;">Click a tab to toggle it — pick any combination to stack those sections here <b>and</b> in every project card and Master Inventory below.</div>
     <div class="model-table-wrap" id="hw-model-table-wrap">
       <table class="model-table">
         <thead>
@@ -315,6 +324,15 @@
         <tfoot id="acc-model-table-foot"></tfoot>
       </table>
     </div>
+    <div class="model-table-wrap" id="prop-model-table-wrap" style="display:none;">
+      <table class="model-table">
+        <thead>
+          <tr><th>Prop</th><th>Project</th><th>Location</th><th class="num">Quantity</th></tr>
+        </thead>
+        <tbody id="prop-model-table-body"></tbody>
+        <tfoot id="prop-model-table-foot"></tfoot>
+      </table>
+    </div>
   </div>
 
   <div class="layout">
@@ -328,9 +346,9 @@
   </aside>
 
   <footer class="note">
-    Devices, Accessories, Projects, Locations, tags, and device notes all sync to a shared Excel workbook via
-    Power Automate, so changes made by anyone show up for everyone. Your view mode (Hardware/Accessories/All),
-    pinned project, and minimized cards stay local to each browser.
+    Devices, Accessories, Props, Projects, Locations, tags, and device notes all sync to a shared Excel workbook via
+    Power Automate, so changes made by anyone show up for everyone. Which of Hardware/Accessories/Props you have
+    showing, your pinned project, and minimized cards all stay local to each browser.
   </footer>
   <footer class="brand">Internal prototype · Centific</footer>
 </main>
@@ -356,8 +374,57 @@
     <div style="font-size:12.5px;color:var(--sub);margin:-8px 0 14px;">What kind of asset are you adding?</div>
     <button id="chooser-device-btn" class="chooser-btn" style="width:100%;text-align:left;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><rect x="9" y="9" width="6" height="6" rx="0.5"></rect><line x1="9" y1="2" x2="9" y2="6"></line><line x1="12" y1="2" x2="12" y2="6"></line><line x1="15" y1="2" x2="15" y2="6"></line><line x1="9" y1="18" x2="9" y2="22"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="15" y1="18" x2="15" y2="22"></line><line x1="2" y1="9" x2="6" y2="9"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="2" y1="15" x2="6" y2="15"></line><line x1="18" y1="9" x2="22" y2="9"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="18" y1="15" x2="22" y2="15"></line></svg> Hardware Device<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Laptops, tablets, and other tracked production hardware</span></button>
     <button id="chooser-accessory-btn" class="chooser-btn" style="width:100%;text-align:left;margin-top:8px;">🎒 Accessory<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Tripods, lux meters, and other lower-priority gear</span></button>
+    <button id="chooser-prop-btn" class="chooser-btn" style="width:100%;text-align:left;margin-top:8px;">📦 Prop<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Regular props and consumables, tracked by quantity — no serial or DC tag</span></button>
     <div class="modal-actions">
       <button id="chooser-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="propModalBackdrop">
+  <div class="modal">
+    <h3>Add prop</h3>
+    <label>Model / description</label>
+    <div class="suggest-wrap">
+      <input id="prop-model" placeholder="e.g. Gaffer tape" autocomplete="off">
+      <div class="suggest-dropdown" id="prop-model-suggest"></div>
+    </div>
+    <label>Quantity</label><input id="prop-qty" type="number" min="0" step="1" value="1">
+    <label>Project</label>
+    <select id="prop-bucket"></select>
+    <label id="prop-location-label">Location</label>
+    <select id="prop-location"></select>
+    <div class="modal-actions">
+      <button id="prop-cancel">Cancel</button>
+      <button id="prop-save" class="primary">Add</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="movePropBackdrop">
+  <div class="modal">
+    <h3>Move prop</h3>
+    <div id="move-prop-sub" style="font-size:12.5px;color:var(--sub);margin:-8px 0 14px;"></div>
+    <label>Quantity to move</label><input id="move-prop-qty" type="number" min="1" step="1">
+    <label>Destination project</label>
+    <select id="move-prop-bucket"></select>
+    <label id="move-prop-location-label">Destination location</label>
+    <select id="move-prop-location"></select>
+    <div id="move-prop-error" style="color:var(--st-broken);font-size:12.5px;margin-top:4px;min-height:16px;"></div>
+    <div class="modal-actions">
+      <button id="move-prop-cancel">Cancel</button>
+      <button id="move-prop-save" class="primary">Move</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="deletePropConfirmBackdrop">
+  <div class="modal">
+    <h3>Delete prop?</h3>
+    <div id="delete-prop-message" style="font-size:13px;color:var(--sub);"></div>
+    <div class="modal-actions">
+      <button id="delete-prop-cancel">Cancel</button>
+      <button id="delete-prop-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Delete</button>
     </div>
   </div>
 </div>
@@ -809,6 +876,7 @@ function seed(){
     archivedCollapsed: false,
     locations: { [MASTER]: [MASTER_LOCATION], "Project Alpha": ["Site A"], "Project Beta": ["Site B"] },
     accessories: [],
+    props: [],
     modelTags: {}
   };
 }
@@ -835,6 +903,7 @@ function normalizeState(){
   }
   (state.devices || []).forEach(d => { if (d.bucket === LEGACY_MASTER){ d.bucket = MASTER; renamedLegacyMaster = true; } });
   (state.accessories || []).forEach(a => { if (a.bucket === LEGACY_MASTER){ a.bucket = MASTER; renamedLegacyMaster = true; } });
+  (state.props || []).forEach(p => { if (p.bucket === LEGACY_MASTER){ p.bucket = MASTER; renamedLegacyMaster = true; } });
 
   if (!state.featured || !state.buckets.includes(state.featured)) state.featured = MASTER;
   if (!state.archived) state.archived = [];
@@ -868,6 +937,16 @@ function normalizeState(){
     if (typeof a.location !== "string") a.location = "";
     if (!a.status) a.status = "instock";
     if (typeof a.bucket !== "string" || !state.buckets.includes(a.bucket)) a.bucket = MASTER;
+  });
+  if (!state.props) state.props = [];
+  // Props are quantity-based (no serial/tag/status) — regular props and
+  // consumables, tracked as however many sit in a given project/location
+  // rather than as individual physical items.
+  state.props.forEach(p => {
+    if (typeof p.model !== "string") p.model = "";
+    p.qty = Math.max(0, parseInt(p.qty, 10) || 0);
+    if (typeof p.location !== "string") p.location = "";
+    if (typeof p.bucket !== "string" || !state.buckets.includes(p.bucket)) p.bucket = MASTER;
   });
   // One-time: accessories used to get auto-IDs like "acc-1785201825554" (a
   // timestamp) — switch to short sequential IDs ("a1", "a2", ...), matching
@@ -906,12 +985,24 @@ function normalizeState(){
     if (a.bucket === MASTER) a.location = MASTER_LOCATION;
     else if (!(state.locations[a.bucket] || []).includes(a.location)) a.location = (state.locations[a.bucket] || [])[0] || "";
   });
-  // Single global switch (Hardware / Accessories / All) — replaces the old
-  // per-project accTab. Set once here, applied to every project card and
-  // Master Inventory, plus the Availability-by-model summary below.
-  if (state.viewMode !== "hardware" && state.viewMode !== "accessories" && state.viewMode !== "all"){
-    state.viewMode = (state.summaryTab === "accessories") ? "accessories" : "hardware";
+  state.props.forEach(p => {
+    if (p.bucket === MASTER) p.location = MASTER_LOCATION;
+    else if (!(state.locations[p.bucket] || []).includes(p.location)) p.location = (state.locations[p.bucket] || [])[0] || "";
+  });
+  // Global switch for which sections show (Hardware / Accessories / Props) —
+  // applied to every project card and Master Inventory, plus the
+  // Availability-by-model summary below. Used to be a single-select value
+  // (including an "All" option); now it's a multi-select set so any
+  // combination can be stacked at once. Migrate the old single value into
+  // the new array form, and always keep at least one tab active.
+  if (!Array.isArray(state.viewModes)){
+    if (state.viewMode === "all") state.viewModes = ["hardware", "accessories"];
+    else if (state.viewMode === "accessories") state.viewModes = ["accessories"];
+    else state.viewModes = ["hardware"];
   }
+  delete state.viewMode;
+  state.viewModes = state.viewModes.filter(m => ["hardware", "accessories", "props"].includes(m));
+  if (state.viewModes.length === 0) state.viewModes = ["hardware"];
   delete state.summaryTab;
   delete state.accTab;
   if (!state.modelTags) state.modelTags = {};
@@ -1133,6 +1224,31 @@ function mergeRemoteAccessories(rows){
   state.accessories = merged;
 }
 
+// Props are quantity-based (no serial/tag/status) — regular props and
+// consumables, tracked by however many sit in a given project/location.
+function mergeRemoteProps(rows){
+  const byId = {};
+  state.props.forEach(p => { byId[p.id] = p; });
+  const remoteIds = new Set(rows.map(r => String(r.id || "")));
+  const merged = rows.filter(r => r.id || r.model).map(r => {
+    const id = String(r.id || ("p" + Date.now().toString() + Math.random().toString(36).slice(2)));
+    if (byId[id] && recentlyEditedLocally(id)) return byId[id];
+    const bucket = String(r.bucket || MASTER);
+    ensureBucketExists(bucket);
+    return {
+      id,
+      model: String(r.model || ""),
+      qty: Math.max(0, parseInt(r.qty, 10) || 0),
+      bucket,
+      location: String(r.location || "")
+    };
+  });
+  state.props.forEach(p => {
+    if (!remoteIds.has(String(p.id)) && recentlyEditedLocally(p.id)) merged.push(p);
+  });
+  state.props = merged;
+}
+
 // Projects: which are active vs archived. Personal UI prefs (pinned/minimized/
 // which tab is showing) stay local — only existence + archived status is shared.
 function mergeRemoteProjects(rows){
@@ -1186,6 +1302,7 @@ function computeFleetFingerprint(data){
   return [
     norm(data.devices, ["id","tag","model","serial","status","bucket","location","tags","notes"]),
     norm(data.accessories, ["id","tag","model","serial","status","bucket","location","tags"]),
+    norm(data.props, ["id","model","qty","bucket","location"]),
     norm(data.projects, ["name","archived","archivedAt"]),
     norm(data.locations, ["bucket","name"])
   ].join("\n---\n");
@@ -1285,6 +1402,11 @@ async function loadFromExcel(){
     mergeRemoteLocations(data.locations || []);
     mergeRemoteDevices(data.devices || []);
     mergeRemoteAccessories(data.accessories || []);
+    // Only merge once the Excel side actually has a Props table wired into
+    // the Load flow's response — until then this key is simply absent, and
+    // Props stay exactly as local-only as everything else was before Excel
+    // sync existed for it.
+    if (data.props !== undefined) mergeRemoteProps(data.props || []);
     // Only merge once the Excel side actually has an ActivityLog step wired
     // into the Load flow's response — until then this key is simply absent,
     // and activity stays exactly as local-only as it's always been.
@@ -1292,6 +1414,7 @@ async function loadFromExcel(){
     const tagsByModel = {};
     collectModelTags(data.devices || [], tagsByModel);
     collectModelTags(data.accessories || [], tagsByModel);
+    collectModelTags(data.props || [], tagsByModel);
     state.modelTags = tagsByModel;
     normalizeState();
     render();
@@ -1406,6 +1529,10 @@ async function doPushToExcel(){
       status: String(a.status || "instock"), bucket: String(a.bucket || ""), location: String(a.location || ""),
       tags: (state.modelTags[a.model] || []).join(";")
     }));
+    const outgoingProps = state.props.map(p => ({
+      id: String(p.id || ""), model: String(p.model || ""), qty: String(p.qty || 0),
+      bucket: String(p.bucket || ""), location: String(p.location || "")
+    }));
 
     try {
       const res = await fetch(EXCEL_SAVE_URL, {
@@ -1414,6 +1541,7 @@ async function doPushToExcel(){
         body: JSON.stringify({
           devices: outgoingDevices,
           accessories: outgoingAccessories,
+          props: outgoingProps,
           projects: projectsPayload,
           locations: locationsPayload
         })
@@ -1431,6 +1559,7 @@ async function doPushToExcel(){
       lastLoadSnapshot = computeFleetFingerprint({
         devices: outgoingDevices,
         accessories: outgoingAccessories,
+        props: outgoingProps,
         projects: projectsPayload,
         locations: locationsPayload
       });
@@ -1441,6 +1570,7 @@ async function doPushToExcel(){
       // built and would still need its own confirmation.
       outgoingDevices.forEach(d => unsavedIds.delete(d.id));
       outgoingAccessories.forEach(a => unsavedIds.delete(a.id));
+      outgoingProps.forEach(p => unsavedIds.delete(p.id));
     } catch (err){
       console.error("Excel save failed:", err);
       setSyncStatus("Couldn't save to Excel — will retry shortly (change is safe locally either way)");
@@ -1497,6 +1627,12 @@ function matchesQuery(d, q){
   if (!q) return true;
   const tags = (state.modelTags[d.model] || []).join(" ");
   return [d.tag, d.model, d.serial, tags].join(" ").toLowerCase().includes(q);
+}
+
+function matchesPropQuery(p, q){
+  if (!q) return true;
+  const tags = (state.modelTags[p.model] || []).join(" ");
+  return [p.model, tags].join(" ").toLowerCase().includes(q);
 }
 
 // Distinct model names already in use, for the Model-field autocomplete
@@ -1933,6 +2069,83 @@ function renderAccessoryRows(containerEl, accessories, locs, compact, bucket){
   });
 }
 
+// --- Props: quantity-based, no serial/tag/status. The qty field is editable
+// in place (for correcting a count or recording consumption at its current
+// location); moving — including splitting some of the quantity off to a
+// different project/location — goes through the Move modal instead.
+function propRowHTML(p, compact){
+  return `
+    <div class="row prop ${compact ? "compact" : "full"}" data-id="${p.id}">
+      <span class="cell sub" title="${p.model}">${p.model}</span>
+      <input type="number" class="prop-qty-input" data-id="${p.id}" min="0" step="1" value="${p.qty}">
+      <button class="prop-move-btn" data-id="${p.id}" title="Move (can split the quantity)">↔ Move</button>
+      <button class="prop-del-btn" data-id="${p.id}" title="Delete prop">🗑</button>
+    </div>
+  `;
+}
+
+function wirePropRows(container){
+  container.querySelectorAll(".prop-qty-input").forEach(inp => {
+    inp.addEventListener("change", e => updatePropQty(e.target.getAttribute("data-id"), e.target.value));
+  });
+  container.querySelectorAll(".prop-move-btn").forEach(btn => {
+    btn.addEventListener("click", () => openMovePropModal(btn.getAttribute("data-id")));
+  });
+  container.querySelectorAll(".prop-del-btn").forEach(btn => {
+    btn.addEventListener("click", () => openDeletePropConfirm(btn.getAttribute("data-id")));
+  });
+}
+
+function updatePropQty(id, newVal){
+  const p = state.props.find(x => x.id === id);
+  if (!p) return;
+  const qty = Math.max(0, parseInt(newVal, 10) || 0);
+  if (p.qty === qty) return;
+  p.qty = qty;
+  markEdited(id);
+  save();
+  render();
+}
+
+let deletePropId = null;
+function openDeletePropConfirm(id){
+  const p = state.props.find(x => x.id === id);
+  if (!p) return;
+  deletePropId = id;
+  document.getElementById("delete-prop-message").innerHTML =
+    `Delete <b>${p.model}</b> (qty ${p.qty}) from <b>${p.bucket}</b>${p.location ? " · " + p.location : ""}? This can't be undone.`;
+  document.getElementById("deletePropConfirmBackdrop").classList.add("open");
+}
+
+function renderPropRows(containerEl, props, locs, compact, bucket){
+  if (!locs.length){
+    containerEl.innerHTML = props.length
+      ? props.map(p => propRowHTML(p, compact)).join("")
+      : `<div class="empty-hint">No props here yet — click + Asset → Prop to add one.</div>`;
+    wirePropRows(containerEl);
+    return;
+  }
+
+  const known = new Set(locs);
+  const groups = locs.map(name => ({ name, list: props.filter(p => p.location === name), isUnassigned: false }));
+  const unassignedProps = props.filter(p => !known.has(p.location));
+  if (unassignedProps.length) groups.push({ name: "Unassigned", list: unassignedProps, isUnassigned: true });
+
+  containerEl.innerHTML = groups.map(g => `
+    <div class="loc-group">
+      <div class="loc-group-head">
+        <span>${g.name} <span class="loc-count">(${g.list.length})</span></span>
+        ${g.isUnassigned ? "" : `<button class="loc-del-btn" data-loc="${g.name}" title="Delete location">✕ Remove</button>`}
+      </div>
+      ${g.list.length ? g.list.map(p => propRowHTML(p, compact)).join("") : `<div class="empty-hint small">No props here</div>`}
+    </div>
+  `).join("");
+  wirePropRows(containerEl);
+  containerEl.querySelectorAll(".loc-del-btn").forEach(btn => {
+    btn.addEventListener("click", () => openDeleteLocationConfirm(bucket, btn.getAttribute("data-loc")));
+  });
+}
+
 function render(){
   const q = document.getElementById("search").value.trim().toLowerCase();
 
@@ -1941,20 +2154,23 @@ function render(){
   const mainIsMaster = mainBucket === MASTER;
   const sidebarBuckets = state.buckets.filter(b => b !== mainBucket);
 
-  // Global view mode (Hardware / Accessories / All) — chosen once, in
-  // "Availability by model", and applied to every project card and Master
-  // Inventory at once. Replaces the old per-project accTab toggle.
-  const viewMode = state.viewMode || "hardware";
-  const showHW = viewMode !== "accessories";
-  const showAcc = viewMode !== "hardware";
+  // Global view mode (Hardware / Accessories / Props) — multi-select, chosen
+  // once in "Availability by model", and applied to every project card and
+  // Master Inventory at once. Any combination can be active; sections stack
+  // in this fixed order (Hardware, Accessories, Props) when more than one is on.
+  const modes = state.viewModes || ["hardware"];
+  const showHW = modes.includes("hardware");
+  const showAcc = modes.includes("accessories");
+  const showProps = modes.includes("props");
 
   // Main (pinned / featured) panel — always the big one on the left
   const mainEl = document.getElementById("main-panel");
   const mainDevices = sortDevices(state.devices.filter(d => d.bucket === mainBucket && matchesQuery(d, q)));
   const mainAccessories = sortAccessories(state.accessories.filter(a => a.bucket === mainBucket && matchesQuery(a, q)));
+  const mainProps = state.props.filter(p => p.bucket === mainBucket && matchesPropQuery(p, q));
   // Hardware location grouping stays project-only (Master never groups its hardware).
-  // Locations themselves are shared per bucket across both sections, so Master's
-  // Accessories section can still have its own locations without affecting Master's Hardware section.
+  // Locations themselves are shared across all three sections, so Master's
+  // Accessories/Props sections can still have their own locations without affecting Master's Hardware section.
   const mainHasLocs = !mainIsMaster && (state.locations[mainBucket] || []).length > 0;
   const mainAccLocs = state.locations[mainBucket] || [];
   mainEl.innerHTML = `
@@ -1980,9 +2196,15 @@ function render(){
       <div class="col-labels acc full"><span></span>${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Location</span><span></span></div>
       <div class="rows-list" id="main-acc-rows"></div>
     ` : ""}
+    ${showProps ? `
+      <div class="section-head">📦 Props <span class="tab-count">${mainProps.length}</span></div>
+      <div class="col-labels prop full"><span>Model</span><span>Quantity</span><span></span><span></span></div>
+      <div class="rows-list" id="main-prop-rows"></div>
+    ` : ""}
   `;
   if (showHW) renderBucketRows(document.getElementById("main-rows"), mainBucket, mainDevices, false);
   if (showAcc) renderAccessoryRows(document.getElementById("main-acc-rows"), mainAccessories, mainAccLocs, false, mainBucket);
+  if (showProps) renderPropRows(document.getElementById("main-prop-rows"), mainProps, mainAccLocs, false, mainBucket);
   wirePinButtons(mainEl);
   wireHeadButtons(mainEl);
   wireSortHeaders(mainEl);
@@ -1996,6 +2218,7 @@ function render(){
     const isMin = state.minimized.includes(b);
     const count = state.devices.filter(d => d.bucket === b && matchesQuery(d, q)).length;
     const accCount = state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)).length;
+    const propCount = state.props.filter(p => p.bucket === b && matchesPropQuery(p, q)).length;
     // Hardware location grouping stays project-only; locations are shared per bucket across sections.
     const bHasLocs = !isMaster && (state.locations[b] || []).length > 0;
     return `
@@ -2023,6 +2246,11 @@ function render(){
           <div class="col-labels acc compact"><span></span>${accSortLabel("model","Model")}${accSortLabel("status","Status")}<span>Loc</span><span></span></div>
           <div class="rows-list" data-bucket="${b}" data-kind="accessory"></div>
         ` : ""}
+        ${showProps ? `
+          <div class="section-head compact">📦 <span class="tab-count">${propCount}</span></div>
+          <div class="col-labels prop compact"><span>Model</span><span>Qty</span><span></span><span></span></div>
+          <div class="rows-list" data-bucket="${b}" data-kind="prop"></div>
+        ` : ""}
       </div>
     `;
   }).join("");
@@ -2040,6 +2268,13 @@ function render(){
       if (accContainer){
         const accessories = sortAccessories(state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)));
         renderAccessoryRows(accContainer, accessories, state.locations[b] || [], true, b);
+      }
+    }
+    if (showProps){
+      const propContainer = sidebarEl.querySelector(`.rows-list[data-bucket="${CSS.escape(b)}"][data-kind="prop"]`);
+      if (propContainer){
+        const props = state.props.filter(p => p.bucket === b && matchesPropQuery(p, q));
+        renderPropRows(propContainer, props, state.locations[b] || [], true, b);
       }
     }
   });
@@ -2092,16 +2327,29 @@ function archivedSectionHTML(){
 }
 
 function renderModelSummary(){
-  const mode = state.viewMode || "hardware";
+  const modes = state.viewModes || ["hardware"];
   document.querySelectorAll("#summary-tabs .tab-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.getAttribute("data-summary-tab") === mode);
+    btn.classList.toggle("active", modes.includes(btn.getAttribute("data-summary-tab")));
   });
-  document.getElementById("hw-model-table-wrap").style.display = (mode === "hardware" || mode === "all") ? "" : "none";
-  document.getElementById("acc-model-table-wrap").style.display = (mode === "accessories" || mode === "all") ? "" : "none";
-  document.getElementById("acc-model-table-wrap").style.marginTop = (mode === "all") ? "18px" : "0";
+  const wraps = [
+    { id: "hw-model-table-wrap", mode: "hardware" },
+    { id: "acc-model-table-wrap", mode: "accessories" },
+    { id: "prop-model-table-wrap", mode: "props" }
+  ];
+  let seenOne = false;
+  wraps.forEach(w => {
+    const el = document.getElementById(w.id);
+    const on = modes.includes(w.mode);
+    el.style.display = on ? "" : "none";
+    // Only the first visible table sits flush; any stacked below it gets a
+    // gap, same spacing "All" used to use when it showed two at once.
+    el.style.marginTop = (on && seenOne) ? "18px" : "0";
+    if (on) seenOne = true;
+  });
 
   renderHardwareModelTable();
   renderAccessoryModelTable();
+  renderPropModelTable();
 }
 
 function renderHardwareModelTable(){
@@ -2215,25 +2463,75 @@ function renderAccessoryModelTable(){
   `;
 }
 
+// Prop availability, broken out by model + project + location — same shape
+// as the accessory table, except quantity is summed from each row's own qty
+// rather than counted, since a single prop row can represent many units.
+function renderPropModelTable(){
+  const body = document.getElementById("prop-model-table-body");
+  const foot = document.getElementById("prop-model-table-foot");
+
+  const counts = {};
+  state.props.forEach(p => {
+    const key = `${p.model} ${p.bucket} ${p.location || "Unassigned"}`;
+    if (!counts[key]) counts[key] = { model: p.model, bucket: p.bucket, location: p.location || "Unassigned", qty: 0 };
+    counts[key].qty += p.qty;
+  });
+
+  const rows = Object.values(counts).sort((x, y) =>
+    x.model.localeCompare(y.model, undefined, { sensitivity: "base" }) ||
+    x.bucket.localeCompare(y.bucket, undefined, { sensitivity: "base" }) ||
+    x.location.localeCompare(y.location, undefined, { sensitivity: "base" })
+  );
+
+  if (rows.length === 0){
+    body.innerHTML = `<tr><td colspan="4" class="empty-hint">No props added yet.</td></tr>`;
+    foot.innerHTML = "";
+    return;
+  }
+
+  body.innerHTML = rows.map(r => `
+    <tr class="model-row-click" data-model="${r.model}" data-kind="prop" title="Click for a project breakdown">
+      <td>${r.model}</td>
+      <td>${r.bucket}</td>
+      <td>${r.location}</td>
+      <td class="num">${r.qty}</td>
+    </tr>
+  `).join("");
+  body.querySelectorAll(".model-row-click").forEach(tr => {
+    tr.addEventListener("click", () => openModelDetail(tr.getAttribute("data-kind"), tr.getAttribute("data-model")));
+  });
+
+  const total = rows.reduce((sum, r) => sum + r.qty, 0);
+  foot.innerHTML = `
+    <tr>
+      <td colspan="3">Total</td>
+      <td class="num">${total}</td>
+    </tr>
+  `;
+}
+
 // --- Model detail modal: project/location breakdown + custom name tags ---
 // Opened by clicking a model row in Availability by Model. Tags entered here
 // are stored per-model and get picked up by the top search bar via matchesQuery().
-let modelDetailTarget = null; // { kind: "hardware"|"accessory", model: "..." }
+let modelDetailTarget = null; // { kind: "hardware"|"accessory"|"prop", model: "..." }
 const modelDetailModal = document.getElementById("modelDetailBackdrop");
 
 function openModelDetail(kind, model){
   modelDetailTarget = { kind, model };
   document.getElementById("md-title").textContent = model;
-  document.getElementById("md-subtitle").textContent = kind === "hardware" ? "Hardware model" : "Accessory model";
+  document.getElementById("md-subtitle").textContent =
+    kind === "hardware" ? "Hardware model" : kind === "prop" ? "Prop" : "Accessory model";
 
-  const items = kind === "hardware"
-    ? state.devices.filter(d => d.model === model)
+  const items = kind === "hardware" ? state.devices.filter(d => d.model === model)
+    : kind === "prop" ? state.props.filter(p => p.model === model)
     : state.accessories.filter(a => a.model === model);
 
   // Simple per-project breakdown: how many of this model sit in each bucket
-  // (Master Inventory included), rather than a row-by-row item table.
+  // (Master Inventory included), rather than a row-by-row item table. Props
+  // sum each row's quantity instead of counting rows, since one row can
+  // represent many units.
   const counts = {};
-  items.forEach(it => { counts[it.bucket] = (counts[it.bucket] || 0) + 1; });
+  items.forEach(it => { counts[it.bucket] = (counts[it.bucket] || 0) + (kind === "prop" ? it.qty : 1); });
   const bucketNames = Object.keys(counts).sort((a, b) => {
     if (a === MASTER) return -1;
     if (b === MASTER) return 1;
@@ -2251,7 +2549,8 @@ function openModelDetail(kind, model){
       </div>
     `).join("");
   }
-  document.getElementById("md-count").textContent = `${items.length} total across all projects`;
+  const totalCount = kind === "prop" ? items.reduce((sum, p) => sum + p.qty, 0) : items.length;
+  document.getElementById("md-count").textContent = `${totalCount} total across all projects`;
 
   renderModelTagChips();
   document.getElementById("md-tag-input").value = "";
@@ -2522,21 +2821,29 @@ function renderLog(){
 // Search
 document.getElementById("search").addEventListener("input", render);
 
-// Global Hardware / Accessories / All switch, in "Availability by model".
-// Drives that summary table AND every project card + Master Inventory below.
-// The buttons live in static HTML, so they're wired once here rather than
-// re-wired on every render() — renderModelSummary() just toggles their
-// "active" class.
+// Hardware / Accessories / Props switch, in "Availability by model". Drives
+// that summary table AND every project card + Master Inventory below. Multi-
+// select: clicking a tab toggles it on/off (any combination can be stacked
+// at once), except it won't let you turn off the very last active one — at
+// least one section always has to be showing. The buttons live in static
+// HTML, so they're wired once here rather than re-wired on every render() —
+// renderModelSummary() just toggles their "active" class.
 document.querySelectorAll("#summary-tabs .tab-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    state.viewMode = btn.getAttribute("data-summary-tab");
+    const tab = btn.getAttribute("data-summary-tab");
+    if (state.viewModes.includes(tab)){
+      if (state.viewModes.length === 1) return; // keep at least one active
+      state.viewModes = state.viewModes.filter(m => m !== tab);
+    } else {
+      state.viewModes = [...state.viewModes, tab];
+    }
     save();
     render();
   });
 });
 
 // Add asset chooser — the single "+ Asset" header button opens this first,
-// then routes to whichever modal (Device or Accessory) matches the pick.
+// then routes to whichever modal (Device, Accessory, or Prop) matches the pick.
 const assetChooserModal = document.getElementById("assetChooserBackdrop");
 document.getElementById("addAssetBtn").onclick = () => assetChooserModal.classList.add("open");
 document.getElementById("chooser-cancel").onclick = () => assetChooserModal.classList.remove("open");
@@ -2547,6 +2854,10 @@ document.getElementById("chooser-device-btn").onclick = () => {
 document.getElementById("chooser-accessory-btn").onclick = () => {
   assetChooserModal.classList.remove("open");
   openAddAccessoryModal(state.featured);
+};
+document.getElementById("chooser-prop-btn").onclick = () => {
+  assetChooserModal.classList.remove("open");
+  openAddPropModal(state.featured);
 };
 
 // Add device modal
@@ -2654,12 +2965,14 @@ function openDeleteLocationConfirm(bucket, name){
   } else {
     const devCount = state.devices.filter(d => d.bucket === bucket && d.location === name).length;
     const accCount = state.accessories.filter(a => a.bucket === bucket && a.location === name).length;
+    const propCount = state.props.filter(p => p.bucket === bucket && p.location === name).length;
     const parts = [];
     if (devCount) parts.push(`${devCount} device${devCount===1?"":"s"}`);
     if (accCount) parts.push(`${accCount} accessor${accCount===1?"y":"ies"}`);
+    if (propCount) parts.push(`${propCount} prop${propCount===1?"":"s"}`);
     document.getElementById("delete-location-message").innerHTML =
-      `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from both Hardware and Accessories.` +
-      (parts.length ? `<br><br>${parts.join(" and ")} there will move to whichever location is left.` : "");
+      `Delete location <b>${name}</b> from <b>${bucket}</b>? This removes it from Hardware, Accessories, and Props.` +
+      (parts.length ? `<br><br>${parts.join(", ")} there will move to whichever location is left.` : "");
     okBtn.style.display = "";
     cancelBtn.textContent = "Cancel";
   }
@@ -2677,10 +2990,13 @@ document.getElementById("delete-location-ok").onclick = () => {
   const fallback = remaining[0] || "";
   let movedCount = 0;
   state.devices.forEach(d => {
-    if (d.bucket === bucket && d.location === name){ d.location = fallback; movedCount++; }
+    if (d.bucket === bucket && d.location === name){ d.location = fallback; markEdited(d.id); movedCount++; }
   });
   state.accessories.forEach(a => {
-    if (a.bucket === bucket && a.location === name){ a.location = fallback; movedCount++; }
+    if (a.bucket === bucket && a.location === name){ a.location = fallback; markEdited(a.id); movedCount++; }
+  });
+  state.props.forEach(p => {
+    if (p.bucket === bucket && p.location === name){ p.location = fallback; markEdited(p.id); movedCount++; }
   });
   logActivity({ ts: new Date().toLocaleString(), type: "location-delete", tag: bucket, from: name, to: movedCount });
   save(); render();
@@ -2888,6 +3204,109 @@ document.getElementById("acc-save").onclick = () => {
 };
 setupModelAutocomplete(document.getElementById("acc-model"), document.getElementById("acc-model-suggest"), existingAccessoryModels);
 
+// Add prop modal — quantity-based, no serial/tag/status.
+const propModal = document.getElementById("propModalBackdrop");
+function updatePropLocationOptions(){
+  const bucket = document.getElementById("prop-bucket").value;
+  const isMaster = bucket === MASTER;
+  document.getElementById("prop-location-label").style.display = isMaster ? "none" : "";
+  document.getElementById("prop-location").style.display = isMaster ? "none" : "";
+  const locs = state.locations[bucket] || [];
+  document.getElementById("prop-location").innerHTML = locOptions(locs, locs[0] || "");
+}
+// Short sequential id ("p1", "p2", ...), same convention as hardware/accessory ids.
+function nextPropId(){
+  let max = 0;
+  state.props.forEach(p => {
+    const m = /^p(\d+)$/.exec(p.id || "");
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return "p" + (max + 1);
+}
+function openAddPropModal(bucket){
+  document.getElementById("prop-bucket").innerHTML = destOptions(bucket);
+  document.getElementById("prop-model").value = "";
+  document.getElementById("prop-qty").value = "1";
+  updatePropLocationOptions();
+  propModal.classList.add("open");
+}
+document.getElementById("prop-bucket").addEventListener("change", updatePropLocationOptions);
+document.getElementById("prop-cancel").onclick = () => propModal.classList.remove("open");
+document.getElementById("prop-save").onclick = () => {
+  const model = document.getElementById("prop-model").value.trim();
+  const qty = Math.max(0, parseInt(document.getElementById("prop-qty").value, 10) || 0);
+  const bucket = document.getElementById("prop-bucket").value;
+  const location = bucket === MASTER ? MASTER_LOCATION : document.getElementById("prop-location").value;
+  if (!model){ alert("Model / description is required."); return; }
+  const newId = nextPropId();
+  state.props.push({ id: newId, model, qty, bucket, location });
+  markEdited(newId);
+  save(); render();
+  propModal.classList.remove("open");
+};
+function existingPropModels(){
+  return [...new Set(state.props.map(p => p.model).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+setupModelAutocomplete(document.getElementById("prop-model"), document.getElementById("prop-model-suggest"), existingPropModels);
+
+// Move prop modal — supports splitting a quantity off to a different
+// project/location rather than always relocating the whole row.
+let movePropId = null;
+const movePropModal = document.getElementById("movePropBackdrop");
+function refreshMovePropLocationOptions(){
+  const bucket = document.getElementById("move-prop-bucket").value;
+  const isMaster = bucket === MASTER;
+  document.getElementById("move-prop-location-label").style.display = isMaster ? "none" : "";
+  document.getElementById("move-prop-location").style.display = isMaster ? "none" : "";
+  const locs = state.locations[bucket] || [];
+  document.getElementById("move-prop-location").innerHTML = locOptions(locs, locs[0] || "");
+}
+document.getElementById("move-prop-bucket").addEventListener("change", refreshMovePropLocationOptions);
+
+function openMovePropModal(id){
+  const p = state.props.find(x => x.id === id);
+  if (!p) return;
+  movePropId = id;
+  document.getElementById("move-prop-sub").innerHTML =
+    `Moving <b>${p.model}</b> — ${p.qty} available in <b>${p.bucket}</b>${p.location ? " · " + p.location : ""}.`;
+  const qtyInput = document.getElementById("move-prop-qty");
+  qtyInput.value = p.qty;
+  qtyInput.max = String(p.qty);
+  document.getElementById("move-prop-bucket").innerHTML = destOptions(p.bucket);
+  document.getElementById("move-prop-error").textContent = "";
+  refreshMovePropLocationOptions();
+  movePropModal.classList.add("open");
+}
+document.getElementById("move-prop-cancel").onclick = () => movePropModal.classList.remove("open");
+document.getElementById("move-prop-save").onclick = () => {
+  const p = state.props.find(x => x.id === movePropId);
+  const errEl = document.getElementById("move-prop-error");
+  if (!p) return;
+  const qty = parseInt(document.getElementById("move-prop-qty").value, 10) || 0;
+  const destBucket = document.getElementById("move-prop-bucket").value;
+  const destLoc = destBucket === MASTER ? MASTER_LOCATION : document.getElementById("move-prop-location").value;
+  if (qty <= 0){ errEl.textContent = "Enter a quantity greater than 0."; return; }
+  if (qty > p.qty){ errEl.textContent = `Only ${p.qty} available to move.`; return; }
+  if (destBucket === p.bucket && destLoc === p.location){ errEl.textContent = "Already there — pick a different project or location."; return; }
+
+  if (qty >= p.qty){
+    // Moving the entire remaining amount — just relocate this row, no split needed.
+    p.bucket = destBucket;
+    p.location = destLoc;
+    markEdited(p.id);
+  } else {
+    // Splitting: shrink the source row, create a new row for the moved amount.
+    p.qty -= qty;
+    markEdited(p.id);
+    const newId = nextPropId();
+    state.props.push({ id: newId, model: p.model, qty, bucket: destBucket, location: destLoc });
+    markEdited(newId);
+  }
+  save(); render();
+  movePropModal.classList.remove("open");
+};
+
 // Archive confirmation modal
 const archiveConfirmModal = document.getElementById("archiveConfirmBackdrop");
 document.getElementById("archive-confirm-cancel").onclick = () => archiveConfirmModal.classList.remove("open");
@@ -2947,6 +3366,17 @@ document.getElementById("delete-accessory-ok").onclick = () => {
   deleteAccessoryId = null;
   save();
   deleteAccessoryModal.classList.remove("open");
+  render();
+};
+
+const deletePropModal = document.getElementById("deletePropConfirmBackdrop");
+document.getElementById("delete-prop-cancel").onclick = () => deletePropModal.classList.remove("open");
+document.getElementById("delete-prop-ok").onclick = () => {
+  if (!deletePropId) return;
+  state.props = state.props.filter(x => x.id !== deletePropId);
+  deletePropId = null;
+  save();
+  deletePropModal.classList.remove("open");
   render();
 };
 
