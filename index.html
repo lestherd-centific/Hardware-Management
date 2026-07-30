@@ -208,6 +208,11 @@
   .log-entry{font-size:12.5px;color:var(--sub);padding:6px 0;border-bottom:1px dashed var(--border);}
   .log-entry:last-child{border-bottom:none;}
   .log-entry b{color:var(--ink);}
+  .log-add-group summary{cursor:pointer;color:var(--sub);list-style:revert;}
+  .log-add-group summary::marker{color:var(--c-violet);}
+  .log-add-group summary b{color:var(--ink);}
+  .log-add-item{font-size:12px;color:var(--sub);padding:4px 0 4px 16px;border-top:1px dashed var(--border);}
+  .log-add-item:first-of-type{margin-top:6px;}
 
   .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(28,27,41,.35);align-items:center;justify-content:center;z-index:10;}
   #authGateBackdrop{backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:rgba(28,27,41,.55);}
@@ -268,12 +273,12 @@
 
   <div class="quickmove">
     <h3>Move by serial number</h3>
-    <div class="qm-hint">Pick devices from the suggestions (or type a serial and press comma / Enter) to stack up multiple, then move them all at once.</div>
+    <div class="qm-hint">Pick devices from the suggestions (or type a serial / DC asset tag and press comma / Enter) to stack up multiple, then move them all at once.</div>
     <div class="row">
       <div class="qm-input-wrap">
         <div class="qm-tag-box" id="qm-tag-box">
           <div class="qm-tags" id="qm-tags"></div>
-          <input type="text" id="qm-serial" placeholder="Type or scan a serial number...">
+          <input type="text" id="qm-serial" placeholder="Type or scan a serial number or DC asset tag...">
         </div>
         <div class="qm-suggestions" id="qm-suggestions"></div>
       </div>
@@ -360,13 +365,13 @@
 <div class="modal-backdrop" id="deviceModalBackdrop">
   <div class="modal">
     <h3>Add device</h3>
-    <label>Asset tag (optional)</label><input id="d-tag" placeholder="e.g. RED-0142">
     <label>Model</label>
     <div class="suggest-wrap">
       <input id="d-model" placeholder="e.g. Surface Laptop 6" autocomplete="off">
       <div class="suggest-dropdown" id="d-model-suggest"></div>
     </div>
-    <label>Serial number</label><input id="d-serial" placeholder="e.g. SN-88213">
+    <label>Asset tag (optional)</label><input id="d-tag" placeholder="e.g. RED-0142">
+    <label>Serial number (optional)</label><input id="d-serial" placeholder="e.g. SN-88213">
     <label>Status</label>
     <select id="d-status"><option value="instock">In stock</option><option value="inuse">In use</option><option value="broken">Broken</option></select>
     <label>Project</label>
@@ -608,7 +613,7 @@ const EXCEL_SAVE_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environ
 // the trigger URL for the new "Log Activity" flow once it's built in Power
 // Automate — until then this stays a placeholder and activity logging is
 // simply skipped over the network (still works locally).
-const EXCEL_LOG_URL = "PASTE_YOUR_LOG_ACTIVITY_FLOW_URL_HERE";
+const EXCEL_LOG_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8e26bfc93c874f6c8246a3979cb8a7e7/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=3ilEBQM-a_67fQBi3yWNIBNo7-lxWk2rs7nQWfj0J8U";
 
 // Seed data pulled from the "Device Returns" tab of Inventory Tracker(1).xlsx.
 // Original per-site location is ignored — everything below has been returned
@@ -950,13 +955,26 @@ async function pushLogEntryToExcel(entry){
       body: JSON.stringify({
         id: String(entry.id || ""), ts: String(entry.ts || ""), type: String(entry.type || ""),
         tag: String(entry.tag || ""), deviceId: String(entry.deviceId || ""),
-        from: String(entry.from || ""), to: String(entry.to || ""), by: String(entry.by || "")
+        from: String(entry.from || ""), to: String(entry.to || ""), by: String(entry.by || ""),
+        model: String(entry.model || "")
       })
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
   } catch (err){
     console.error("Activity log sync failed (kept locally only):", err);
   }
+}
+
+// Logs a newly added device. Field reuse note: "tag" holds the serial here,
+// same convention as every other log entry (move/status/location all use
+// tag = serial as the device's display label) — the device's own asset tag
+// (e.g. "RED-0142") goes in "from" instead, since that field's otherwise
+// unused for an add. Rendered/grouped specially in renderLog() below: a
+// run of adds by the same person close together in time condenses into one
+// expandable "added N devices" line instead of spamming N separate lines.
+function logAddedDevice(id, assetTag, model, serial, bucket){
+  markEdited(id);
+  logActivity({ ts: new Date().toLocaleString(), type: "add", tag: serial, deviceId: id, from: assetTag, to: bucket, model });
 }
 
 // Extracts the millisecond timestamp embedded at the start of a log id, for
@@ -977,7 +995,7 @@ function mergeRemoteLog(rows){
     .map(r => ({
       id: String(r.id), ts: String(r.ts || ""), type: String(r.type || ""), tag: String(r.tag || ""),
       deviceId: String(r.deviceid || r.deviceId || ""), from: String(r.from || ""), to: String(r.to || ""),
-      by: String(r.by || "")
+      by: String(r.by || ""), model: String(r.model || "")
     }));
   const remoteIds = new Set(remote.map(e => e.id));
   const localOnly = state.log.filter(e => e.id && !remoteIds.has(e.id));
@@ -2305,6 +2323,7 @@ function openDeviceDetail(id){
     let text;
     if (e.type === "status") text = `${who}changed status from ${e.from} to <b>${e.to}</b>`;
     else if (e.type === "location") text = `${who}changed location from ${e.from} to <b>${e.to}</b>`;
+    else if (e.type === "add") text = `${who}added this device to <b>${e.to}</b>`;
     else text = `${who}moved from ${e.from} to <b>${e.to}</b>`;
     return `<div class="log-entry">${text}<br>${e.ts}</div>`;
   }).join("") : `<div class="log-entry">No tracked history yet.</div>`;
@@ -2386,24 +2405,66 @@ function restoreProject(name){
   render();
 }
 
+// How close together (by actual elapsed time, not list position) a run of
+// "add" entries from the same person needs to be to fold into one condensed
+// group — long enough to cover a scanning session or a bulk import, short
+// enough that adds from a different sitting still show up as their own line.
+const ADD_GROUP_WINDOW_MS = 10 * 60 * 1000;
+
+// Walks the log (newest-first) and folds consecutive "add" entries from the
+// same person, close together in time, into a single group. Anything else
+// (or an "add" too far from its neighbor) stays its own entry.
+function buildLogGroups(entries){
+  const groups = [];
+  entries.forEach(e => {
+    const last = groups[groups.length - 1];
+    if (e.type === "add" && last && last.type === "add" && last.by === e.by &&
+        Math.abs(logIdTimestamp(last.items[last.items.length - 1].id) - logIdTimestamp(e.id)) < ADD_GROUP_WINDOW_MS){
+      last.items.push(e);
+    } else if (e.type === "add"){
+      groups.push({ type: "add", by: e.by, items: [e] });
+    } else {
+      groups.push({ type: "single", entry: e });
+    }
+  });
+  return groups;
+}
+
+function renderLogEntryText(e){
+  const who = e.by ? `<b>${e.by}</b> ` : "";
+  if (e.type === "status") return `${who}changed <b>${e.tag}</b> status from ${e.from} to <b>${e.to}</b>`;
+  if (e.type === "location") return `${who}changed <b>${e.tag}</b> location from ${e.from} to <b>${e.to}</b>`;
+  if (e.type === "location-delete") return `${who}deleted location <b>${e.from}</b> from <b>${e.tag}</b>` + (e.to > 0 ? ` (${e.to} device${e.to===1?"":"s"} moved to Unassigned)` : "");
+  if (e.type === "archive") return e.to === "Archived" ? `${who}archived <b>${e.tag}</b>` : `${who}restored <b>${e.tag}</b>`;
+  if (e.type === "delete") return `${who}deleted <b>${e.tag}</b> from ${e.from}`;
+  if (e.type === "rename") return `${who}renamed project <b>${e.from}</b> to <b>${e.to}</b>`;
+  if (e.type === "delete-project") return `${who}permanently deleted archived project <b>${e.tag}</b>`;
+  // "add" field reuse: tag = serial, from = asset tag, to = bucket (see logAddedDevice).
+  if (e.type === "add") return `${who}added <b>${e.from}</b> — ${e.model || ""} <span style="color:var(--sub);">(S/N ${e.tag})</span> to <b>${e.to}</b>`;
+  return `${who}moved <b>${e.tag}</b> from ${e.from} → <b>${e.to}</b>`;
+}
+
 function renderLog(){
   const el = document.getElementById("logList");
   if (state.log.length === 0){
     el.innerHTML = `<div class="log-entry">No activity yet.</div>`;
     return;
   }
-  el.innerHTML = state.log.slice(0,60).map(e => {
-    const who = e.by ? `<b>${e.by}</b> ` : "";
-    let text;
-    if (e.type === "status") text = `${who}changed <b>${e.tag}</b> status from ${e.from} to <b>${e.to}</b>`;
-    else if (e.type === "location") text = `${who}changed <b>${e.tag}</b> location from ${e.from} to <b>${e.to}</b>`;
-    else if (e.type === "location-delete") text = `${who}deleted location <b>${e.from}</b> from <b>${e.tag}</b>` + (e.to > 0 ? ` (${e.to} device${e.to===1?"":"s"} moved to Unassigned)` : "");
-    else if (e.type === "archive") text = e.to === "Archived" ? `${who}archived <b>${e.tag}</b>` : `${who}restored <b>${e.tag}</b>`;
-    else if (e.type === "delete") text = `${who}deleted <b>${e.tag}</b> from ${e.from}`;
-    else if (e.type === "rename") text = `${who}renamed project <b>${e.from}</b> to <b>${e.to}</b>`;
-    else if (e.type === "delete-project") text = `${who}permanently deleted archived project <b>${e.tag}</b>`;
-    else text = `${who}moved <b>${e.tag}</b> from ${e.from} → <b>${e.to}</b>`;
-    return `<div class="log-entry">${text}<br>${e.ts}</div>`;
+  // Group over a larger window than what's actually displayed — otherwise a
+  // big batch of adds could, pre-grouping, fill the entire visible list and
+  // crowd out everything else even though post-grouping it's just one line.
+  const groups = buildLogGroups(state.log.slice(0, 300)).slice(0, 60);
+  el.innerHTML = groups.map(g => {
+    if (g.type === "single" || g.items.length === 1){
+      const e = g.type === "single" ? g.entry : g.items[0];
+      return `<div class="log-entry">${renderLogEntryText(e)}<br>${e.ts}</div>`;
+    }
+    const who = g.by ? `<b>${g.by}</b> ` : "";
+    const rows = g.items.map(it => `<div class="log-add-item">${it.from} — ${it.model || ""} <span style="color:var(--sub);">S/N ${it.tag}</span> · ${it.to}</div>`).join("");
+    return `<details class="log-entry log-add-group">
+      <summary>${who}added <b>${g.items.length}</b> devices<br><span style="color:var(--sub);font-weight:400;">${g.items[0].ts}</span></summary>
+      ${rows}
+    </details>`;
   }).join("");
 }
 
@@ -2475,7 +2536,9 @@ document.getElementById("d-save").onclick = () => {
       return;
     }
   }
-  state.devices.push({ id: Date.now().toString(), tag: tag || "—", model, serial: serial || "—", status, bucket, location, notes: [] });
+  const newId = Date.now().toString();
+  state.devices.push({ id: newId, tag: tag || "—", model, serial: serial || "—", status, bucket, location, notes: [] });
+  logAddedDevice(newId, tag || "—", model, serial || "—", bucket);
   save(); render();
   deviceModal.classList.remove("open");
   ["d-tag","d-model","d-serial"].forEach(id => document.getElementById(id).value = "");
@@ -2853,8 +2916,20 @@ document.getElementById("importFile").addEventListener("change", e => {
     try {
       const parsed = JSON.parse(reader.result);
       if (!parsed.buckets || !parsed.devices) throw new Error("bad shape");
+      // Bulk-importing (e.g. a hand-edited template with a batch of new
+      // equipment) is a full state replace, same as always — but that would
+      // silently wipe this browser's activity history too, since a template
+      // built from scratch has no log of its own. Carry the existing log
+      // forward when the incoming file doesn't bring a real one of its own,
+      // and log every device that's new in this import so it shows up in
+      // Recent Activity same as one added through the "+ Asset" modal would.
+      const previousDeviceIds = new Set(state.devices.map(d => d.id));
+      const previousLog = state.log || [];
       state = parsed;
+      if (!state.log || state.log.length === 0) state.log = previousLog;
       normalizeState();
+      const newlyAddedDevices = state.devices.filter(d => !previousDeviceIds.has(d.id));
+      newlyAddedDevices.forEach(d => logAddedDevice(d.id, d.tag, d.model, d.serial, d.bucket));
       save(); render();
     } catch(err){ alert("Couldn't read that file — expected a JSON export from this tool."); }
   };
@@ -2917,13 +2992,25 @@ function qmRemoveTag(id){
   qmRenderTags();
 }
 
+// Matches on serial number OR the device's own DC asset tag (e.g. "RED-0142")
+// — scanning either one during a physical move should find the device.
+function qmMatchesQuery(d, q){
+  return d.serial.toLowerCase().includes(q) || (d.tag && d.tag.toLowerCase().includes(q));
+}
+function qmFindExact(query){
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return null;
+  return state.devices.find(d => !qmTaggedIds.includes(d.id) &&
+    (d.serial.toLowerCase() === q || (d.tag && d.tag.toLowerCase() === q)));
+}
+
 function qmRenderSuggestions(query){
   const box = document.getElementById("qm-suggestions");
   if (!query){ box.classList.remove("open"); box.innerHTML = ""; return; }
   const q = query.trim().toLowerCase();
-  const matches = state.devices.filter(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase().includes(q)).slice(0, 8);
+  const matches = state.devices.filter(d => !qmTaggedIds.includes(d.id) && qmMatchesQuery(d, q)).slice(0, 8);
   if (matches.length === 0){
-    box.innerHTML = `<div class="item">No devices match that serial number.</div>`;
+    box.innerHTML = `<div class="item">No devices match that serial number or DC asset tag.</div>`;
     box.classList.add("open");
     return;
   }
@@ -2950,7 +3037,7 @@ document.getElementById("qm-serial").addEventListener("input", e => {
     parts.forEach(part => {
       part = part.trim();
       if (!part) return;
-      const match = state.devices.find(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase() === part.toLowerCase());
+      const match = qmFindExact(part);
       if (match) qmAddTag(match.id);
     });
     e.target.value = tail;
@@ -2966,7 +3053,7 @@ document.getElementById("qm-serial").addEventListener("keydown", e => {
     e.preventDefault();
     const query = input.value.trim();
     if (!query) return;
-    const match = state.devices.find(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase() === query.toLowerCase());
+    const match = qmFindExact(query);
     if (match){
       qmAddTag(match.id);
     } else {
@@ -2986,7 +3073,7 @@ document.getElementById("qm-move-btn").addEventListener("click", () => {
   // Give any leftover typed text (not yet turned into a tag) one last chance to match.
   const leftover = input.value.trim();
   if (leftover){
-    const match = state.devices.find(d => !qmTaggedIds.includes(d.id) && d.serial.toLowerCase() === leftover.toLowerCase());
+    const match = qmFindExact(leftover);
     if (match) qmTaggedIds.push(match.id);
   }
 
