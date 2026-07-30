@@ -1052,21 +1052,34 @@ function collectModelTags(rows, into){
 let recentEdits = {}; // id -> timestamp (ms) of the most recent local edit
 const EDIT_GRACE_MS = 15000; // comfortably longer than a full check+save round trip
 
+// A device/accessory stays in here from the moment it's edited until a save
+// that actually included it has come back successful — unlike the 15s grace
+// window above (which only covers Excel's normal read-after-write lag), this
+// has no time limit. That matters when a save times out or fails outright
+// (e.g. the Office Script taking >120s and Power Automate's request/response
+// trigger hard-timing-out with a 504): the 15s window alone would expire long
+// before a slow flow either succeeds or gets retried, so the very next
+// periodic/refocus refresh would treat Excel's (still old) data as ground
+// truth and quietly erase the edit — which is exactly what was happening
+// here, several minutes apart, well outside that 15s window.
+let unsavedIds = new Set();
+
 function markEdited(id){
   recentEdits[id] = Date.now();
+  unsavedIds.add(id);
   // Housekeeping: drop anything old enough that it can't matter anymore.
   const cutoff = Date.now() - EDIT_GRACE_MS;
   Object.keys(recentEdits).forEach(k => { if (recentEdits[k] < cutoff) delete recentEdits[k]; });
 }
 function recentlyEditedLocally(id){
-  const t = recentEdits[id];
-  return !!t && (Date.now() - t) < EDIT_GRACE_MS;
+  return (!!recentEdits[id] && (Date.now() - recentEdits[id]) < EDIT_GRACE_MS) || unsavedIds.has(id);
 }
 
 function mergeRemoteDevices(rows){
   const byId = {};
   state.devices.forEach(d => { byId[d.id] = d; });
-  state.devices = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
+  const remoteIds = new Set(rows.map(r => String(r.id || "")));
+  const merged = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
     const id = String(r.id || (Date.now().toString() + Math.random().toString(36).slice(2)));
     // A very recent local edit to this device may not be reflected in this
     // read yet — keep the local version rather than risk quietly reverting
@@ -1085,12 +1098,21 @@ function mergeRemoteDevices(rows){
       notes: parseNotesColumn(r.notes)
     };
   });
+  // A device whose save never landed at all (timed out, never even made it
+  // into a row) won't have a matching remote row to protect above — it just
+  // isn't in `rows`. Add it back in directly rather than letting a merge
+  // silently erase a device that was added but never successfully synced.
+  state.devices.forEach(d => {
+    if (!remoteIds.has(String(d.id)) && recentlyEditedLocally(d.id)) merged.push(d);
+  });
+  state.devices = merged;
 }
 
 function mergeRemoteAccessories(rows){
   const byId = {};
   state.accessories.forEach(a => { byId[a.id] = a; });
-  state.accessories = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
+  const remoteIds = new Set(rows.map(r => String(r.id || "")));
+  const merged = rows.filter(r => r.id || r.tag || r.model || r.serial).map(r => {
     const id = String(r.id || ("acc-" + Date.now().toString() + Math.random().toString(36).slice(2)));
     if (byId[id] && recentlyEditedLocally(id)) return byId[id];
     const bucket = String(r.bucket || MASTER);
@@ -1105,6 +1127,10 @@ function mergeRemoteAccessories(rows){
       location: String(r.location || "")
     };
   });
+  state.accessories.forEach(a => {
+    if (!remoteIds.has(String(a.id)) && recentlyEditedLocally(a.id)) merged.push(a);
+  });
+  state.accessories = merged;
 }
 
 // Projects: which are active vs archived. Personal UI prefs (pinned/minimized/
@@ -1304,6 +1330,19 @@ let conflictBlocked = false;
 let lastSaveCompletedAt = 0;
 const SAVE_SETTLE_MS = 15000;
 
+// A failed save (e.g. the Office Script timing out past Power Automate's
+// ~120s hard limit as the table's grown) used to just get logged to the
+// console and quietly given up on — nothing retried it, and the only thing
+// keeping the edit alive locally was the 15s grace window above, which
+// expires long before a slow flow either succeeds or gets retried. The next
+// periodic/refocus refresh would then treat Excel's (still unchanged) data as
+// ground truth and erase the edit. unsavedIds (declared further down) closes
+// that gap by protecting the edit with no time limit; this timer is what
+// actually gets it to Excel eventually instead of waiting on an unrelated
+// future edit to carry it forward.
+let retryTimer = null;
+const RETRY_DELAY_MS = 20000;
+
 function pushToExcel(){
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
@@ -1396,9 +1435,21 @@ async function doPushToExcel(){
         locations: locationsPayload
       });
       lastSaveCompletedAt = Date.now();
+      // This save just confirmed these specific ids made it to Excel — clear
+      // only those from the unsaved set (not the whole thing), since a
+      // different edit could have happened after this payload was already
+      // built and would still need its own confirmation.
+      outgoingDevices.forEach(d => unsavedIds.delete(d.id));
+      outgoingAccessories.forEach(a => unsavedIds.delete(a.id));
     } catch (err){
       console.error("Excel save failed:", err);
-      setSyncStatus("Couldn't save to Excel — change kept locally only");
+      setSyncStatus("Couldn't save to Excel — will retry shortly (change is safe locally either way)");
+      // Don't just give up and wait for an unrelated future edit to carry
+      // this forward — that could be indefinite. Retry on the normal debounced
+      // path (so it still respects every existing guard) after a bounded delay,
+      // long enough not to hammer a flow that's already struggling.
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => { retryTimer = null; pushToExcel(); }, RETRY_DELAY_MS);
     }
   } finally {
     saveInFlight = false;
