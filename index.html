@@ -167,6 +167,17 @@
   .cio-search-result .found-in b{color:var(--ink);}
   .cio-search-result .not-found{color:var(--sub);padding:10px 12px;}
 
+  /* Share-link box — a one-click way for leadership to hand moderators the
+     URL of the separate check-in/out site, without needing to dig it up
+     from anywhere else. */
+  .cio-share-wrap{margin-bottom:16px;background:var(--hover-bg);border-radius:8px;padding:10px 12px;}
+  .cio-share-row{display:flex;gap:8px;margin-top:6px;}
+  .cio-share-row input{flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--ink);font-size:12.5px;font-family:inherit;}
+  .cio-share-row input:focus{outline:none;border-color:var(--c-violet);}
+  .cio-copy-btn{border:1px solid var(--border);background:var(--panel);color:var(--ink);border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;}
+  .cio-copy-btn:hover{border-color:var(--c-violet);color:var(--c-violet);}
+  .cio-copy-btn.copied{border-color:var(--st-inuse);color:var(--st-inuse);}
+
   .cio-mod-leaderboard{margin-top:6px;}
   .cio-mod-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
   .cio-mod-row:last-child{border-bottom:none;}
@@ -466,6 +477,14 @@
     <div class="checkinout-dashboard">
       <h3>Check-in / check-out activity</h3>
       <div class="cio-hint">Read-only view of the separate Check-In/Out log moderators use — this site never writes to that workbook.</div>
+
+      <div class="cio-share-wrap">
+        <div class="cio-section-label" style="margin-bottom:0;">Share with moderators</div>
+        <div class="cio-share-row">
+          <input type="text" id="cio-share-link" value="https://lestherd-centific.github.io/Check-in-Out-Tracker/" readonly>
+          <button id="cio-share-copy-btn" class="cio-copy-btn" type="button" title="Copy link">📋 Copy link</button>
+        </div>
+      </div>
 
       <div class="cio-search-wrap">
         <div class="cio-section-label">Find a device</div>
@@ -3994,6 +4013,40 @@ function renderCioSearchResult(){
 }
 const cioSearchInputEl = document.getElementById("cio-search-input");
 if (cioSearchInputEl) cioSearchInputEl.addEventListener("input", renderCioSearchResult);
+
+// Copy-link box, so leadership can hand moderators the check-in/out site's
+// URL without having to go find it anywhere else. navigator.clipboard needs
+// a secure context (GitHub Pages is https, so this is fine); the
+// select+execCommand fallback covers any browser/context where it isn't
+// available.
+const cioShareCopyBtn = document.getElementById("cio-share-copy-btn");
+if (cioShareCopyBtn){
+  cioShareCopyBtn.addEventListener("click", async () => {
+    const linkInput = document.getElementById("cio-share-link");
+    const link = linkInput.value;
+    let copied = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(link);
+        copied = true;
+      }
+    } catch (err){ /* fall through to the manual-selection fallback below */ }
+    if (!copied){
+      try {
+        linkInput.select();
+        linkInput.setSelectionRange(0, link.length);
+        copied = document.execCommand("copy");
+      } catch (err){ copied = false; }
+    }
+    const originalLabel = cioShareCopyBtn.innerHTML;
+    cioShareCopyBtn.innerHTML = copied ? "✅ Copied!" : "⚠️ Copy failed";
+    cioShareCopyBtn.classList.toggle("copied", copied);
+    setTimeout(() => {
+      cioShareCopyBtn.innerHTML = originalLabel;
+      cioShareCopyBtn.classList.remove("copied");
+    }, 1800);
+  });
+}
 
 // Bar chart of currently checked-out devices grouped by project — gives
 // leadership a sense of which productions are holding the most gear right
