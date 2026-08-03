@@ -118,6 +118,40 @@
   .page-tab-btn{padding:9px 16px;border-radius:8px 8px 0 0;font-size:13px;}
   .page-tab-btn.active{border-bottom:2px solid var(--c-violet);}
 
+  /* Grouped-by-moderator disclosure rows, shared shape for both the full
+     Check-In/Out tab list (.cio-row-group / .cio-subrow) and the pinned
+     mini widget (.cio-mini-group / .cio-mini-subrow) — same expand/collapse
+     convention already used for "added N devices" entries in Recent activity. */
+  .cio-row-group{border-bottom:1px solid var(--border);padding:8px 0;}
+  .cio-row-group:last-child{border-bottom:none;}
+  .cio-row-group summary{cursor:pointer;list-style:revert;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;}
+  .cio-row-group summary::marker{color:var(--c-violet);}
+  .cio-row-group summary .cio-name{font-weight:600;}
+  .cio-row-group summary .cio-count{color:var(--sub);font-weight:500;}
+  .cio-row-group summary .cio-right{color:var(--sub);font-size:12.5px;white-space:nowrap;}
+  .cio-row-group summary .cio-right.danger{color:var(--st-broken);font-weight:700;}
+  .cio-group-body{margin-top:6px;padding-left:18px;}
+  .cio-subrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;font-size:12.5px;border-bottom:1px dashed var(--border);}
+  .cio-subrow:last-child{border-bottom:none;}
+  .cio-subrow .cio-name{font-weight:600;}
+  .cio-subrow .cio-meta{color:var(--sub);font-size:12px;}
+  .cio-subrow .cio-right{color:var(--sub);white-space:nowrap;font-size:12px;}
+  .cio-subrow .cio-right.danger{color:var(--st-broken);font-weight:700;}
+
+  .cio-mini-list details{border-bottom:1px solid var(--border);padding:7px 0;}
+  .cio-mini-list details:last-child{border-bottom:none;}
+  .cio-mini-list summary{cursor:pointer;list-style:revert;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px;}
+  .cio-mini-list summary::marker{color:var(--c-violet);}
+  .cio-mini-list summary .cio-name{font-weight:600;}
+  .cio-mini-list summary .cio-name .sub{color:var(--sub);font-weight:400;}
+  .cio-mini-list summary .cio-age{font-size:12px;color:var(--sub);white-space:nowrap;}
+  .cio-mini-list summary .cio-age.overdue{color:var(--st-broken);font-weight:700;}
+  .cio-mini-group-body{margin-top:6px;padding-left:16px;}
+  .cio-mini-subrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;font-size:12px;color:var(--sub);border-bottom:1px dashed var(--border);}
+  .cio-mini-subrow:last-child{border-bottom:none;}
+  .cio-mini-subrow .model{color:var(--ink);}
+  .cio-mini-subrow .overdue{color:var(--st-broken);font-weight:700;}
+
   .cio-mod-leaderboard{margin-top:6px;}
   .cio-mod-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
   .cio-mod-row:last-child{border-bottom:none;}
@@ -3800,6 +3834,29 @@ function cioOpenCheckouts(){
     .map(pair => pair.checkout);
 }
 
+// Groups a list of open checkouts by moderator name, e.g. "Lesther (4)" —
+// each group carries its items sorted oldest-first so the group's own
+// summary (age/overdue) reflects its longest-outstanding device. Groups
+// themselves are sorted with any overdue group first, then by longest
+// outstanding item, so the riskiest moderators surface at the top of both
+// the mini widget and the full list.
+function groupOpenByMod(openWithAge){
+  const byMod = {};
+  openWithAge.forEach(c => {
+    const key = c.modName || "(unknown)";
+    if (!byMod[key]) byMod[key] = [];
+    byMod[key].push(c);
+  });
+  return Object.entries(byMod).map(([modName, items]) => {
+    const sorted = items.slice().sort((a, b) => b.ms - a.ms);
+    return { modName, items: sorted, count: sorted.length, overdue: sorted.some(i => i.overdue), maxMs: sorted[0].ms };
+  }).sort((a, b) => (b.overdue - a.overdue) || (b.maxMs - a.maxMs));
+}
+function cioAgeLabel(ms){
+  const hours = ms / 3600000;
+  return hours < 24 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
+}
+
 function renderCheckInOutDashboard(){
   const open = cioOpenCheckouts();
   const now = Date.now();
@@ -3828,17 +3885,28 @@ function renderCheckInOutDashboard(){
   if (openWithAge.length === 0){
     listEl.innerHTML = '<div class="cio-empty">Nothing is currently checked out.</div>';
   } else {
-    listEl.innerHTML = openWithAge.map(c => {
-      const hours = c.ms / 3600000;
-      const ageLabel = hours < 24 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
+    const groups = groupOpenByMod(openWithAge);
+    listEl.innerHTML = groups.map(g => {
+      const headAge = cioAgeLabel(g.maxMs);
+      const rows = g.items.map(c => {
+        const ageLabel = cioAgeLabel(c.ms);
+        return `
+        <div class="cio-subrow">
+          <div>
+            <div class="cio-name">${escapeHtmlCio(c.tag)} — ${escapeHtmlCio(c.model)}</div>
+            <div class="cio-meta">${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</div>
+          </div>
+          <div class="cio-right ${c.overdue ? "danger" : ""}">${c.overdue ? `${ageLabel} · overdue` : `${ageLabel} out`}</div>
+        </div>`;
+      }).join("");
       return `
-      <div class="cio-row">
-        <div>
-          <div class="cio-name">${escapeHtmlCio(c.tag)} — ${escapeHtmlCio(c.model)}</div>
-          <div class="cio-meta">${escapeHtmlCio(c.modName)} · ${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</div>
-        </div>
-        <div class="cio-right">${c.overdue ? `<span class="cio-badge">${ageLabel} · overdue</span>` : `${ageLabel} out`}</div>
-      </div>`;
+      <details class="cio-row-group">
+        <summary>
+          <span class="cio-name">${escapeHtmlCio(g.modName)} <span class="cio-count">(${g.count})</span></span>
+          <span class="cio-right ${g.overdue ? "danger" : ""}">${g.overdue ? `${headAge} · overdue` : `${headAge} out`}</span>
+        </summary>
+        <div class="cio-group-body">${rows}</div>
+      </details>`;
     }).join("");
   }
 
@@ -3860,15 +3928,26 @@ function renderCioMiniList(openWithAge){
     el.innerHTML = '<div class="cio-empty">Nothing is currently checked out.</div>';
     return;
   }
-  el.innerHTML = openWithAge.map(c => {
-    const hours = c.ms / 3600000;
-    const ageLabel = hours < 24 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
+  const groups = groupOpenByMod(openWithAge);
+  el.innerHTML = groups.map(g => {
+    const headAge = cioAgeLabel(g.maxMs);
+    const rows = g.items.map(c => {
+      const ageLabel = cioAgeLabel(c.ms);
+      return `
+      <div class="cio-mini-subrow">
+        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span></span>
+        <span>${escapeHtmlCio(c.project)}</span>
+        <span class="${c.overdue ? "overdue" : ""}">${ageLabel}${c.overdue ? " · overdue" : ""}</span>
+      </div>`;
+    }).join("");
     return `
-    <div class="cio-mini-row">
-      <div class="cio-name">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span></div>
-      <div class="cio-meta">${escapeHtmlCio(c.modName)} · ${escapeHtmlCio(c.project)}</div>
-      <div class="cio-age ${c.overdue ? "overdue" : ""}">${ageLabel}${c.overdue ? " · overdue" : ""}</div>
-    </div>`;
+    <details class="cio-mini-group">
+      <summary>
+        <span class="cio-name">${escapeHtmlCio(g.modName)} <span class="sub">(${g.count})</span></span>
+        <span class="cio-age ${g.overdue ? "overdue" : ""}">${headAge}${g.overdue ? " · overdue" : ""}</span>
+      </summary>
+      <div class="cio-mini-group-body">${rows}</div>
+    </details>`;
   }).join("");
 }
 
