@@ -152,6 +152,21 @@
   .cio-mini-subrow .model{color:var(--ink);}
   .cio-mini-subrow .overdue{color:var(--st-broken);font-weight:700;}
 
+  /* Serial/asset-tag lookup at the top of the Check-In/Out Activity tab —
+     answers "who has this device right now?" without scanning the grouped
+     list by eye. */
+  .cio-search-wrap{margin-bottom:16px;}
+  .cio-search-wrap input{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--panel));color:var(--ink);font-size:13px;font-family:inherit;}
+  .cio-search-wrap input:focus{outline:none;border-color:var(--c-violet);}
+  .cio-search-result{margin-top:8px;font-size:12.5px;}
+  .cio-search-result:empty{margin-top:0;}
+  .cio-search-result .found-out{background:var(--hover-bg);border-radius:8px;padding:10px 12px;}
+  .cio-search-result .found-out .who{font-weight:600;color:var(--ink);}
+  .cio-search-result .found-out .who .overdue-tag{color:var(--st-broken);font-weight:700;}
+  .cio-search-result .found-in{background:var(--hover-bg);border-radius:8px;padding:10px 12px;color:var(--sub);}
+  .cio-search-result .found-in b{color:var(--ink);}
+  .cio-search-result .not-found{color:var(--sub);padding:10px 12px;}
+
   .cio-mod-leaderboard{margin-top:6px;}
   .cio-mod-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
   .cio-mod-row:last-child{border-bottom:none;}
@@ -367,14 +382,6 @@
 
 <main>
 
-  <div class="cio-mini-widget" id="cio-mini-widget">
-    <div class="cio-mini-head">
-      <div class="cio-section-label" style="margin-bottom:0;">Currently checked out</div>
-      <button class="cio-mini-link" id="cio-mini-view-all">View full activity →</button>
-    </div>
-    <div class="cio-mini-list" id="cio-mini-list"></div>
-  </div>
-
   <div class="page-tabs" id="page-tabs">
     <button class="tab-btn page-tab-btn active" data-page-tab="inventory">📋 Inventory</button>
     <button class="tab-btn page-tab-btn" data-page-tab="checkinout">🔁 Check-In/Out Activity</button>
@@ -459,9 +466,20 @@
     <div class="checkinout-dashboard">
       <h3>Check-in / check-out activity</h3>
       <div class="cio-hint">Read-only view of the separate Check-In/Out log moderators use — this site never writes to that workbook.</div>
+
+      <div class="cio-search-wrap">
+        <div class="cio-section-label">Find a device</div>
+        <input type="text" id="cio-search-input" placeholder="Search by serial number or asset tag…" autocomplete="off">
+        <div class="cio-search-result" id="cio-search-result"></div>
+      </div>
+
       <div class="cio-kpis" id="cio-kpis"></div>
-      <div class="cio-section-label">Currently checked out</div>
-      <div class="cio-list" id="cio-open-list"></div>
+
+      <div class="cio-mini-widget" id="cio-mini-widget">
+        <div class="cio-section-label" style="margin-bottom:0;">Currently checked out, by moderator</div>
+        <div class="cio-mini-list" id="cio-mini-list"></div>
+      </div>
+
       <div class="cio-charts">
         <div>
           <div class="cio-section-label">Checkouts vs check-ins, last 14 days</div>
@@ -3775,8 +3793,6 @@ function switchPageTab(tab){
     sec.style.display = sec.getAttribute("data-page-section") === tab ? "" : "none";
   });
 }
-const cioMiniViewAllBtn = document.getElementById("cio-mini-view-all");
-if (cioMiniViewAllBtn) cioMiniViewAllBtn.addEventListener("click", () => switchPageTab("checkinout"));
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 
 // If there's no remembered login yet, block behind the sign-in screen right
@@ -3881,46 +3897,17 @@ function renderCheckInOutDashboard(){
     <div class="cio-kpi"><div class="cio-label">Active mods, 7d</div><div class="cio-value">${activeMods7d}</div></div>
   `;
 
-  const listEl = document.getElementById("cio-open-list");
-  if (openWithAge.length === 0){
-    listEl.innerHTML = '<div class="cio-empty">Nothing is currently checked out.</div>';
-  } else {
-    const groups = groupOpenByMod(openWithAge);
-    listEl.innerHTML = groups.map(g => {
-      const headAge = cioAgeLabel(g.maxMs);
-      const rows = g.items.map(c => {
-        const ageLabel = cioAgeLabel(c.ms);
-        return `
-        <div class="cio-subrow">
-          <div>
-            <div class="cio-name">${escapeHtmlCio(c.tag)} — ${escapeHtmlCio(c.model)}</div>
-            <div class="cio-meta">${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</div>
-          </div>
-          <div class="cio-right ${c.overdue ? "danger" : ""}">${c.overdue ? `${ageLabel} · overdue` : `${ageLabel} out`}</div>
-        </div>`;
-      }).join("");
-      return `
-      <details class="cio-row-group">
-        <summary>
-          <span class="cio-name">${escapeHtmlCio(g.modName)} <span class="cio-count">(${g.count})</span></span>
-          <span class="cio-right ${g.overdue ? "danger" : ""}">${g.overdue ? `${headAge} · overdue` : `${headAge} out`}</span>
-        </summary>
-        <div class="cio-group-body">${rows}</div>
-      </details>`;
-    }).join("");
-  }
-
   renderCioTrendChart();
   renderCioConditionChart(checkins30d);
   renderCioMiniList(openWithAge);
   renderCioProjectChart(openWithAge);
   renderCioModLeaderboard(checkInOutLog.filter(e => (parseCioTs(e.ts)?.getTime() || 0) >= thirtyDaysAgo));
+  renderCioSearchResult();
 }
 
-// Condensed version of the open-checkouts list, pinned above the page tabs
-// so leadership sees status at a glance without switching into the
-// Check-In/Out Activity tab. Same underlying data as the full list, just a
-// tighter row format (model · tag / mod · project / age).
+// The one "currently checked out" list in the Check-In/Out Activity tab —
+// grouped by moderator (e.g. "Lesther (4)"), expand a name to see each
+// device's tag, model, project/location, and age or overdue status.
 function renderCioMiniList(openWithAge){
   const el = document.getElementById("cio-mini-list");
   if (!el) return;
@@ -3936,7 +3923,7 @@ function renderCioMiniList(openWithAge){
       return `
       <div class="cio-mini-subrow">
         <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span></span>
-        <span>${escapeHtmlCio(c.project)}</span>
+        <span>${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</span>
         <span class="${c.overdue ? "overdue" : ""}">${ageLabel}${c.overdue ? " · overdue" : ""}</span>
       </div>`;
     }).join("");
@@ -3950,6 +3937,63 @@ function renderCioMiniList(openWithAge){
     </details>`;
   }).join("");
 }
+
+// Serial number / asset tag lookup — searches the FULL check-in/out log
+// (not just currently-open checkouts), since a device that's already been
+// returned still has useful history to show. Exact match on tag/serial is
+// tried first; falls back to a substring match so a partial scan or typo
+// still finds something. Only the single most recent event decides status:
+// if it's an unreturned "checkout", the device is out; if it's a "checkin",
+// the device is available and we show who last had it.
+function cioSearchDevice(query){
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return null;
+  const exact = checkInOutLog.filter(e => (e.tag && e.tag.toLowerCase() === q) || (e.serial && e.serial.toLowerCase() === q));
+  const candidates = exact.length ? exact : checkInOutLog.filter(e =>
+    (e.tag && e.tag.toLowerCase().includes(q)) || (e.serial && e.serial.toLowerCase().includes(q))
+  );
+  if (candidates.length === 0) return { found: false, query };
+  const sorted = candidates.slice().sort((a, b) => (parseCioTs(b.ts)?.getTime() || 0) - (parseCioTs(a.ts)?.getTime() || 0));
+  const latest = sorted[0];
+  if (latest.eventType === "checkout"){
+    const t = parseCioTs(latest.ts);
+    const ms = t ? Date.now() - t.getTime() : 0;
+    const overdue = t ? ms > CHECKINOUT_OVERDUE_HOURS * 60 * 60 * 1000 : false;
+    return { found: true, status: "out", event: latest, ageLabel: cioAgeLabel(ms), overdue };
+  }
+  return { found: true, status: "in", event: latest };
+}
+
+function renderCioSearchResult(){
+  const input = document.getElementById("cio-search-input");
+  const el = document.getElementById("cio-search-result");
+  if (!input || !el) return;
+  const result = cioSearchDevice(input.value);
+  if (!result){
+    el.innerHTML = "";
+    return;
+  }
+  if (!result.found){
+    el.innerHTML = `<div class="not-found">No check-in/out history found for "${escapeHtmlCio(result.query)}".</div>`;
+    return;
+  }
+  const e = result.event;
+  if (result.status === "out"){
+    el.innerHTML = `
+    <div class="found-out">
+      <div class="who">${escapeHtmlCio(e.model)} · ${escapeHtmlCio(e.tag)}${e.serial ? ` (S/N ${escapeHtmlCio(e.serial)})` : ""} is currently checked out by ${escapeHtmlCio(e.modName)}</div>
+      <div>${escapeHtmlCio(e.project)} / ${escapeHtmlCio(e.location)} · out ${result.ageLabel}${result.overdue ? ` <span class="overdue-tag">· overdue</span>` : ""}</div>
+    </div>`;
+  } else {
+    el.innerHTML = `
+    <div class="found-in">
+      ${escapeHtmlCio(e.model)} · ${escapeHtmlCio(e.tag)}${e.serial ? ` (S/N ${escapeHtmlCio(e.serial)})` : ""} is <b>not</b> currently checked out.
+      Last returned by <b>${escapeHtmlCio(e.modName)}</b> on ${escapeHtmlCio(e.ts)}${e.condition ? `, condition: ${escapeHtmlCio(e.condition)}` : ""}.
+    </div>`;
+  }
+}
+const cioSearchInputEl = document.getElementById("cio-search-input");
+if (cioSearchInputEl) cioSearchInputEl.addEventListener("input", renderCioSearchResult);
 
 // Bar chart of currently checked-out devices grouped by project — gives
 // leadership a sense of which productions are holding the most gear right
