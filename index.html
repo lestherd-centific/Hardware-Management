@@ -13,6 +13,7 @@
     --st-instock:#2563eb; --st-instock-bg:#e7edfd;
     --st-inuse:#16a34a; --st-inuse-bg:#e6f7ec;
     --st-broken:#dc2626; --st-broken-bg:#fdeaea;
+    --cond-fair:#d97706; --cond-fair-bg:#fdf3e0;
     --drop-green:#16a34a; --drop-green-bg:rgba(22,163,74,.06); --drop-green-bg-active:rgba(22,163,74,.16);
   }
   html[data-theme="dark"]{
@@ -22,6 +23,7 @@
     --st-instock:#7aa8fb; --st-instock-bg:#1c2745;
     --st-inuse:#5fdb95; --st-inuse-bg:#183226;
     --st-broken:#f9847c; --st-broken-bg:#3c2020;
+    --cond-fair:#f0b429; --cond-fair-bg:#3a2a12;
     --drop-green:#5fdb95; --drop-green-bg:rgba(95,219,149,.1); --drop-green-bg-active:rgba(95,219,149,.22);
   }
   *{box-sizing:border-box;}
@@ -69,6 +71,29 @@
 
   .model-summary{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;}
   .model-summary h3{margin:0 0 10px 0;font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;}
+
+  .checkinout-dashboard{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;}
+  .checkinout-dashboard h3{margin:0 0 10px 0;font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;}
+  .checkinout-dashboard .cio-hint{font-size:11.5px;color:var(--sub);margin:-6px 0 12px;}
+  .cio-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px;}
+  .cio-kpi{background:var(--hover-bg);border-radius:8px;padding:10px 12px;}
+  .cio-kpi .cio-label{font-size:11.5px;color:var(--sub);}
+  .cio-kpi .cio-value{font-size:22px;font-weight:600;margin-top:2px;color:var(--ink);}
+  .cio-kpi .cio-value.danger{color:var(--st-broken);}
+  .cio-section-label{font-size:12.5px;font-weight:600;color:var(--ink);margin-bottom:6px;}
+  .cio-list{margin-bottom:18px;}
+  .cio-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  .cio-row:last-child{border-bottom:none;}
+  .cio-row .cio-name{font-weight:600;}
+  .cio-row .cio-meta{color:var(--sub);font-size:12px;}
+  .cio-row .cio-right{text-align:right;color:var(--sub);font-size:12.5px;white-space:nowrap;}
+  .cio-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--st-broken-bg);color:var(--st-broken);white-space:nowrap;}
+  .cio-empty{padding:10px 0;color:var(--sub);font-size:12.5px;}
+  .cio-charts{display:grid;grid-template-columns:1.3fr 1fr;gap:24px;}
+  .cio-chart-legend{display:flex;gap:16px;font-size:12px;color:var(--sub);margin-bottom:6px;flex-wrap:wrap;}
+  .cio-chart-legend span{display:inline-flex;align-items:center;gap:5px;}
+  .cio-chart-legend i{width:10px;height:10px;border-radius:2px;display:inline-block;}
+  @media (max-width: 900px){ .cio-charts{grid-template-columns:1fr;} }
   .model-table{width:100%;border-collapse:collapse;font-size:13px;}
   .model-table th{text-align:left;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;padding:6px 10px;border-bottom:1px solid var(--border);}
   .model-table th.num,.model-table td.num{text-align:right;}
@@ -279,6 +304,33 @@
 </header>
 
 <main>
+
+  <div class="checkinout-dashboard">
+    <h3>Check-in / check-out activity</h3>
+    <div class="cio-hint">Read-only view of the separate Check-In/Out log moderators use — this site never writes to that workbook.</div>
+    <div class="cio-kpis" id="cio-kpis"></div>
+    <div class="cio-section-label">Currently checked out</div>
+    <div class="cio-list" id="cio-open-list"></div>
+    <div class="cio-charts">
+      <div>
+        <div class="cio-section-label">Checkouts vs check-ins, last 14 days</div>
+        <div class="cio-chart-legend">
+          <span><i style="background:#2563eb;"></i>Checkouts</span>
+          <span><i style="background:#ec4899;"></i>Check-ins</span>
+        </div>
+        <div style="position:relative;width:100%;height:220px;">
+          <canvas id="cioTrendChart" role="img" aria-label="Bar chart of daily checkouts and check-ins over the last 14 days"></canvas>
+        </div>
+      </div>
+      <div>
+        <div class="cio-section-label">Condition on return, last 30 days</div>
+        <div style="position:relative;width:100%;height:180px;">
+          <canvas id="cioCondChart" role="img" aria-label="Donut chart of returned-item condition over the last 30 days"></canvas>
+        </div>
+        <div class="cio-chart-legend" id="cio-cond-legend" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
 
   <div class="quickmove">
     <h3>Move by serial number</h3>
@@ -658,6 +710,7 @@
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script>
 const MASTER = "Master Inventory";
 const MASTER_LOCATION = "WA.Redmond";
@@ -681,6 +734,12 @@ const EXCEL_SAVE_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environ
 // Automate — until then this stays a placeholder and activity logging is
 // simply skipped over the network (still works locally).
 const EXCEL_LOG_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8e26bfc93c874f6c8246a3979cb8a7e7/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=3ilEBQM-a_67fQBi3yWNIBNo7-lxWk2rs7nQWfj0J8U";
+
+// Read-only view into the separate Check-In/Out site's log — this main
+// tracker never writes to that workbook, only displays it for leadership.
+// Same "CheckInOut - Load Data" flow the check-in/out site itself uses.
+const CHECKINOUT_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/4838ed8350324c4ca02fb04ec2d9ef23/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=jDGVC0LF1iAcwrt1jyHjnrmytF1MI82ddmxTeUEmE5Y";
+const CHECKINOUT_OVERDUE_HOURS = 48;
 
 // Seed data pulled from the "Device Returns" tab of Inventory Tracker(1).xlsx.
 // Original per-site location is ignored — everything below has been returned
@@ -3601,6 +3660,12 @@ function applyTheme(theme){
 document.getElementById("themeToggle").addEventListener("click", () => {
   const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   applyTheme(current === "dark" ? "light" : "dark");
+  // Chart.js can't read CSS variables from canvas, so its colors are picked
+  // at render time based on the theme attribute — redraw so a toggle takes
+  // effect immediately instead of waiting for the next poll.
+  if (typeof renderCheckInOutDashboard === "function" && checkInOutLog.length >= 0 && document.getElementById("cioTrendChart")){
+    renderCioTrendChart();
+  }
 });
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 
@@ -3612,8 +3677,173 @@ applyTheme(localStorage.getItem(THEME_KEY) || "light");
 renderAuthStatus();
 if (!authInfo) showAuthGate();
 
+// ---------------------------------------------------------------------------
+// Check-In/Out Activity — read-only. This tracker never writes to the
+// check-in/out workbook, it only fetches and displays it. Its own polling
+// loop, independent of the Devices/Accessories/Props save-conflict machinery
+// above, since there's nothing here to conflict with.
+// ---------------------------------------------------------------------------
+let checkInOutLog = [];
+
+async function loadCheckInOutData(){
+  try {
+    // This flow's trigger requires POST (the main tracker's own Load flow
+    // accepts a plain GET, but this one doesn't).
+    const res = await fetch(CHECKINOUT_LOAD_URL, { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    checkInOutLog = (data.checkoutLog || []).map(r => ({
+      id: String(r.id || ""), checkoutId: String(r.checkoutId || ""), eventType: String(r.eventType || ""),
+      ts: String(r.ts || ""), modName: String(r.modName || ""), deviceId: String(r.deviceId || ""),
+      tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
+      project: String(r.project || ""), location: String(r.location || ""),
+      condition: String(r.condition || ""), notes: String(r.notes || "")
+    })).filter(r => r.id);
+    renderCheckInOutDashboard();
+  } catch (err){
+    console.error("Check-in/out log load failed:", err);
+  }
+}
+
+// A row's ts is written as toLocaleString() (e.g. "8/1/2026, 9:00:00 AM"),
+// not ISO — parseable by new Date() in Chrome/Edge, which is what this is
+// built against, but wrapped defensively in case a browser ever disagrees.
+function parseCioTs(ts){
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function cioOpenCheckouts(){
+  const byId = {};
+  checkInOutLog.forEach(e => {
+    if (!byId[e.checkoutId]) byId[e.checkoutId] = {};
+    byId[e.checkoutId][e.eventType] = e;
+  });
+  return Object.values(byId)
+    .filter(pair => pair.checkout && !pair.checkin)
+    .map(pair => pair.checkout);
+}
+
+function renderCheckInOutDashboard(){
+  const open = cioOpenCheckouts();
+  const now = Date.now();
+  const overdueMs = CHECKINOUT_OVERDUE_HOURS * 60 * 60 * 1000;
+  const openWithAge = open.map(c => {
+    const t = parseCioTs(c.ts);
+    const ms = t ? now - t.getTime() : 0;
+    return { ...c, ms, overdue: t ? ms > overdueMs : false };
+  }).sort((a, b) => b.ms - a.ms);
+
+  const overdueCount = openWithAge.filter(c => c.overdue).length;
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const checkins30d = checkInOutLog.filter(e => e.eventType === "checkin" && (parseCioTs(e.ts)?.getTime() || 0) >= thirtyDaysAgo);
+  const damaged30d = checkins30d.filter(e => e.condition === "Damaged").length;
+  const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const activeMods7d = new Set(checkInOutLog.filter(e => (parseCioTs(e.ts)?.getTime() || 0) >= sevenDaysAgo).map(e => e.modName)).size;
+
+  document.getElementById("cio-kpis").innerHTML = `
+    <div class="cio-kpi"><div class="cio-label">Currently checked out</div><div class="cio-value">${openWithAge.length}</div></div>
+    <div class="cio-kpi"><div class="cio-label">Overdue (${CHECKINOUT_OVERDUE_HOURS}h+)</div><div class="cio-value ${overdueCount ? "danger" : ""}">${overdueCount}</div></div>
+    <div class="cio-kpi"><div class="cio-label">Returned damaged, 30d</div><div class="cio-value">${damaged30d}</div></div>
+    <div class="cio-kpi"><div class="cio-label">Active mods, 7d</div><div class="cio-value">${activeMods7d}</div></div>
+  `;
+
+  const listEl = document.getElementById("cio-open-list");
+  if (openWithAge.length === 0){
+    listEl.innerHTML = '<div class="cio-empty">Nothing is currently checked out.</div>';
+  } else {
+    listEl.innerHTML = openWithAge.map(c => {
+      const hours = c.ms / 3600000;
+      const ageLabel = hours < 24 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
+      return `
+      <div class="cio-row">
+        <div>
+          <div class="cio-name">${escapeHtmlCio(c.tag)} — ${escapeHtmlCio(c.model)}</div>
+          <div class="cio-meta">${escapeHtmlCio(c.modName)} · ${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</div>
+        </div>
+        <div class="cio-right">${c.overdue ? `<span class="cio-badge">${ageLabel} · overdue</span>` : `${ageLabel} out`}</div>
+      </div>`;
+    }).join("");
+  }
+
+  renderCioTrendChart();
+  renderCioConditionChart(checkins30d);
+}
+
+function escapeHtmlCio(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+let cioTrendChartInstance = null;
+function renderCioTrendChart(){
+  const days = [];
+  const checkoutCounts = [];
+  const checkinCounts = [];
+  const now = new Date();
+  for (let i = 13; i >= 0; i--){
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const dayKey = d.toDateString();
+    days.push(label);
+    checkoutCounts.push(checkInOutLog.filter(e => e.eventType === "checkout" && parseCioTs(e.ts)?.toDateString() === dayKey).length);
+    checkinCounts.push(checkInOutLog.filter(e => e.eventType === "checkin" && parseCioTs(e.ts)?.toDateString() === dayKey).length);
+  }
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const gridColor = isDark ? "#33314a" : "#e7e3f0";
+  const tickColor = isDark ? "#9c98b0" : "#68657a";
+  if (cioTrendChartInstance) cioTrendChartInstance.destroy();
+  cioTrendChartInstance = new Chart(document.getElementById("cioTrendChart"), {
+    type: "bar",
+    data: {
+      labels: days,
+      datasets: [
+        { label: "Checkouts", data: checkoutCounts, backgroundColor: "#2563eb", borderRadius: 3 },
+        { label: "Check-ins", data: checkinCounts, backgroundColor: "#ec4899", borderRadius: 3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: tickColor, font: { size: 11 } }, grid: { display: false } },
+        y: { ticks: { color: tickColor, font: { size: 11 }, precision: 0 }, grid: { color: gridColor } }
+      }
+    }
+  });
+}
+
+let cioCondChartInstance = null;
+function renderCioConditionChart(checkins30d){
+  const counts = { Good: 0, Fair: 0, Damaged: 0 };
+  checkins30d.forEach(e => { if (counts[e.condition] !== undefined) counts[e.condition]++; });
+  const total = counts.Good + counts.Fair + counts.Damaged;
+  const legendEl = document.getElementById("cio-cond-legend");
+  if (total === 0){
+    document.getElementById("cioCondChart").style.display = "none";
+    legendEl.innerHTML = '<span style="color:var(--sub);">No check-ins in the last 30 days.</span>';
+    return;
+  }
+  document.getElementById("cioCondChart").style.display = "";
+  const colors = { Good: "#16a34a", Fair: "#d97706", Damaged: "#dc2626" };
+  legendEl.innerHTML = ["Good", "Fair", "Damaged"].map(k =>
+    `<span><i style="background:${colors[k]};"></i>${k} · ${Math.round((counts[k] / total) * 100)}%</span>`
+  ).join("");
+  if (cioCondChartInstance) cioCondChartInstance.destroy();
+  cioCondChartInstance = new Chart(document.getElementById("cioCondChart"), {
+    type: "doughnut",
+    data: {
+      labels: ["Good", "Fair", "Damaged"],
+      datasets: [{ data: [counts.Good, counts.Fair, counts.Damaged], backgroundColor: [colors.Good, colors.Fair, colors.Damaged], borderColor: getComputedStyle(document.documentElement).getPropertyValue("--panel") || "#fff", borderWidth: 2 }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+  });
+}
+
 render(); // render immediately from local cache so the page isn't blank while Excel loads
 loadFromExcel();
+loadCheckInOutData();
+setInterval(() => { if (document.visibilityState === "visible") loadCheckInOutData(); }, 25000);
 </script>
 </body>
 </html>
