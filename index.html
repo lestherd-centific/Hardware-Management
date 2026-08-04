@@ -1158,24 +1158,21 @@ function normalizeState(){
         a.id = "a" + (max + 1);
       });
   }
-  // Nothing should ever sit "Unassigned". Master Inventory always has exactly
-  // one real location (everything there is assumed to be in Redmond); every
-  // other project always has at least one location too (enforced at project
-  // creation). Anything that's still blank/invalid gets self-healed here —
-  // Master items go to WA.Redmond, everything else falls back to its
-  // project's first defined location.
+  // Nothing should ever sit "Unassigned". Master Inventory is a project like
+  // any other now — it can have more than one real location (e.g. Redmond
+  // and Las Vegas), managed the same way via each project's settings gear.
+  // WA.Redmond is guaranteed to always be one of Master's locations as a
+  // sane default; anything that's still blank/invalid for ANY bucket
+  // (Master included) self-heals to that bucket's first defined location.
   if (!state.locations[MASTER].includes(MASTER_LOCATION)) state.locations[MASTER].unshift(MASTER_LOCATION);
   state.devices.forEach(d => {
-    if (d.bucket === MASTER) d.location = MASTER_LOCATION;
-    else if (!(state.locations[d.bucket] || []).includes(d.location)) d.location = (state.locations[d.bucket] || [])[0] || "";
+    if (!(state.locations[d.bucket] || []).includes(d.location)) d.location = (state.locations[d.bucket] || [])[0] || "";
   });
   state.accessories.forEach(a => {
-    if (a.bucket === MASTER) a.location = MASTER_LOCATION;
-    else if (!(state.locations[a.bucket] || []).includes(a.location)) a.location = (state.locations[a.bucket] || [])[0] || "";
+    if (!(state.locations[a.bucket] || []).includes(a.location)) a.location = (state.locations[a.bucket] || [])[0] || "";
   });
   state.props.forEach(p => {
-    if (p.bucket === MASTER) p.location = MASTER_LOCATION;
-    else if (!(state.locations[p.bucket] || []).includes(p.location)) p.location = (state.locations[p.bucket] || [])[0] || "";
+    if (!(state.locations[p.bucket] || []).includes(p.location)) p.location = (state.locations[p.bucket] || [])[0] || "";
   });
   // Global switch for which sections show (Hardware / Accessories / Props) —
   // applied to every project card and Master Inventory, plus the
@@ -2210,9 +2207,9 @@ function moveAccessory(id, bucket){
   if (!a || a.bucket === bucket) return;
   a.bucket = bucket;
   // Locations are specific to the previous project, so drop into the new
-  // project's first location (Master always uses MASTER_LOCATION) rather
-  // than leaving it Unassigned.
-  a.location = bucket === MASTER ? MASTER_LOCATION : ((state.locations[bucket] || [])[0] || "");
+  // project's first location (Master included, now that it can have real
+  // locations too) rather than leaving it Unassigned.
+  a.location = (state.locations[bucket] || [])[0] || "";
   markEdited(id);
   save();
   render();
@@ -2356,10 +2353,10 @@ function render(){
   const mainDevices = sortDevices(state.devices.filter(d => d.bucket === mainBucket && matchesQuery(d, q)));
   const mainAccessories = sortAccessories(state.accessories.filter(a => a.bucket === mainBucket && matchesQuery(a, q)));
   const mainProps = state.props.filter(p => p.bucket === mainBucket && matchesPropQuery(p, q));
-  // Hardware location grouping stays project-only (Master never groups its hardware).
-  // Locations themselves are shared across all three sections, so Master's
-  // Accessories/Props sections can still have their own locations without affecting Master's Hardware section.
-  const mainHasLocs = !mainIsMaster && (state.locations[mainBucket] || []).length > 0;
+  // Master groups its hardware by location exactly like any other project
+  // now, since it can have more than one real location (e.g. Redmond and
+  // Las Vegas). Locations are shared across all three sections per bucket.
+  const mainHasLocs = (state.locations[mainBucket] || []).length > 0;
   const mainAccLocs = state.locations[mainBucket] || [];
   mainEl.innerHTML = `
     <div class="panel-head">
@@ -2407,8 +2404,9 @@ function render(){
     const count = state.devices.filter(d => d.bucket === b && matchesQuery(d, q)).length;
     const accCount = state.accessories.filter(a => a.bucket === b && matchesQuery(a, q)).length;
     const propCount = state.props.filter(p => p.bucket === b && matchesPropQuery(p, q)).length;
-    // Hardware location grouping stays project-only; locations are shared per bucket across sections.
-    const bHasLocs = !isMaster && (state.locations[b] || []).length > 0;
+    // Locations are shared per bucket across sections; Master groups its
+    // hardware by location too now, same as any other project.
+    const bHasLocs = (state.locations[b] || []).length > 0;
     return `
       <div class="mini-card${isMin ? " minimized" : ""}" data-bucket="${b}" draggable="true">
         <div class="panel-head">
@@ -2798,14 +2796,15 @@ document.getElementById("md-close").addEventListener("click", () => modelDetailM
 
 // Moves a device to a different bucket. Used by drag-drop and quick-move-by-serial.
 // location is optional — drag-drop omits it and gets auto-assigned the
-// destination's first location (Master always uses MASTER_LOCATION); quick-move
-// passes the location the user explicitly picked. Either way, it's never blank.
+// destination's first location (Master included, now that it can have real
+// locations too); quick-move passes the location the user explicitly picked.
+// Either way, it's never blank.
 function dropInto(id, bucket, location){
   const d = state.devices.find(x => x.id === id);
   if (!d || d.bucket === bucket) return;
   const from = d.bucket;
   d.bucket = bucket;
-  d.location = bucket === MASTER ? MASTER_LOCATION : (location || (state.locations[bucket] || [])[0] || "");
+  d.location = location || (state.locations[bucket] || [])[0] || "";
   markEdited(id);
   logActivity({ ts: new Date().toLocaleString(), type: "move", tag: d.serial, deviceId: d.id, from, to: bucket });
   save();
@@ -3052,16 +3051,22 @@ document.getElementById("chooser-prop-btn").onclick = () => {
 const deviceModal = document.getElementById("deviceModalBackdrop");
 function updateDeviceLocationOptions(){
   const bucket = document.getElementById("d-bucket").value;
-  const isMaster = bucket === MASTER;
-  document.getElementById("d-location-label").style.display = isMaster ? "none" : "";
-  document.getElementById("d-location").style.display = isMaster ? "none" : "";
   const locs = state.locations[bucket] || [];
+  // Only worth showing when there's an actual choice to make — with 0 or 1
+  // location for this project, there's nothing to pick, so just use it
+  // silently (the select still gets a value, it's just hidden).
+  const showPicker = locs.length > 1;
+  document.getElementById("d-location-label").style.display = showPicker ? "" : "none";
+  document.getElementById("d-location").style.display = showPicker ? "" : "none";
   // Default to the project's first location instead of "Unassigned" so new
   // devices always start with somewhere real to be.
   document.getElementById("d-location").innerHTML = locOptions(locs, locs[0] || "");
 }
 function openAddDeviceModal(){
   document.getElementById("d-bucket").innerHTML = destOptions(MASTER);
+  // Reset to the common case every time this opens, rather than carrying
+  // over whatever status was left selected from a previous add.
+  document.getElementById("d-status").value = "instock";
   updateDeviceLocationOptions();
   deviceModal.classList.add("open");
 }
@@ -3073,7 +3078,7 @@ document.getElementById("d-save").onclick = () => {
   const serial = document.getElementById("d-serial").value.trim();
   const status = document.getElementById("d-status").value;
   const bucket = document.getElementById("d-bucket").value;
-  const location = bucket === MASTER ? MASTER_LOCATION : document.getElementById("d-location").value;
+  const location = document.getElementById("d-location").value;
   if (!model){ alert("Model is required."); return; }
   // Serial number is the one thing that should be unique per physical
   // device — block adding a duplicate rather than letting it slip in.
@@ -3339,10 +3344,10 @@ document.getElementById("delete-archived-project-ok").onclick = () => {
 const accessoryModal = document.getElementById("accessoryModalBackdrop");
 function updateAccessoryLocationOptions(){
   const bucket = document.getElementById("acc-bucket").value;
-  const isMaster = bucket === MASTER;
-  document.getElementById("acc-location-label").style.display = isMaster ? "none" : "";
-  document.getElementById("acc-location").style.display = isMaster ? "none" : "";
   const locs = state.locations[bucket] || [];
+  const showPicker = locs.length > 1;
+  document.getElementById("acc-location-label").style.display = showPicker ? "" : "none";
+  document.getElementById("acc-location").style.display = showPicker ? "" : "none";
   // Default to the project's first location instead of "Unassigned" so new
   // accessories always start with somewhere real to be.
   document.getElementById("acc-location").innerHTML = locOptions(locs, locs[0] || "");
@@ -3375,7 +3380,7 @@ document.getElementById("acc-save").onclick = () => {
   const serial = document.getElementById("acc-serial").value.trim();
   const status = document.getElementById("acc-status").value;
   const bucket = document.getElementById("acc-bucket").value;
-  const location = bucket === MASTER ? MASTER_LOCATION : document.getElementById("acc-location").value;
+  const location = document.getElementById("acc-location").value;
   if (!model){ alert("Model / description is required."); return; }
   // Same serial-uniqueness guard as Add Device — blank serials are exempt
   // since most accessories don't have one recorded.
@@ -3396,10 +3401,10 @@ setupModelAutocomplete(document.getElementById("acc-model"), document.getElement
 const propModal = document.getElementById("propModalBackdrop");
 function updatePropLocationOptions(){
   const bucket = document.getElementById("prop-bucket").value;
-  const isMaster = bucket === MASTER;
-  document.getElementById("prop-location-label").style.display = isMaster ? "none" : "";
-  document.getElementById("prop-location").style.display = isMaster ? "none" : "";
   const locs = state.locations[bucket] || [];
+  const showPicker = locs.length > 1;
+  document.getElementById("prop-location-label").style.display = showPicker ? "" : "none";
+  document.getElementById("prop-location").style.display = showPicker ? "" : "none";
   document.getElementById("prop-location").innerHTML = locOptions(locs, locs[0] || "");
 }
 // Short sequential id ("p1", "p2", ...), same convention as hardware/accessory ids.
@@ -3424,7 +3429,7 @@ document.getElementById("prop-save").onclick = () => {
   const model = document.getElementById("prop-model").value.trim();
   const qty = Math.max(0, parseInt(document.getElementById("prop-qty").value, 10) || 0);
   const bucket = document.getElementById("prop-bucket").value;
-  const location = bucket === MASTER ? MASTER_LOCATION : document.getElementById("prop-location").value;
+  const location = document.getElementById("prop-location").value;
   if (!model){ alert("Model / description is required."); return; }
   const newId = nextPropId();
   state.props.push({ id: newId, model, qty, bucket, location });
@@ -3444,10 +3449,10 @@ let movePropId = null;
 const movePropModal = document.getElementById("movePropBackdrop");
 function refreshMovePropLocationOptions(){
   const bucket = document.getElementById("move-prop-bucket").value;
-  const isMaster = bucket === MASTER;
-  document.getElementById("move-prop-location-label").style.display = isMaster ? "none" : "";
-  document.getElementById("move-prop-location").style.display = isMaster ? "none" : "";
   const locs = state.locations[bucket] || [];
+  const showPicker = locs.length > 1;
+  document.getElementById("move-prop-location-label").style.display = showPicker ? "" : "none";
+  document.getElementById("move-prop-location").style.display = showPicker ? "" : "none";
   document.getElementById("move-prop-location").innerHTML = locOptions(locs, locs[0] || "");
 }
 document.getElementById("move-prop-bucket").addEventListener("change", refreshMovePropLocationOptions);
@@ -3473,7 +3478,7 @@ document.getElementById("move-prop-save").onclick = () => {
   if (!p) return;
   const qty = parseInt(document.getElementById("move-prop-qty").value, 10) || 0;
   const destBucket = document.getElementById("move-prop-bucket").value;
-  const destLoc = destBucket === MASTER ? MASTER_LOCATION : document.getElementById("move-prop-location").value;
+  const destLoc = document.getElementById("move-prop-location").value;
   if (qty <= 0){ errEl.textContent = "Enter a quantity greater than 0."; return; }
   if (qty > p.qty){ errEl.textContent = `Only ${p.qty} available to move.`; return; }
   if (destBucket === p.bucket && destLoc === p.location){ errEl.textContent = "Already there — pick a different project or location."; return; }
@@ -3619,16 +3624,16 @@ function qmRefreshDest(){
 // Keeps the required location picker in sync with whichever project is
 // currently selected as the move destination — moving somewhere always
 // requires picking a real location, same as adding a new device does.
-// Hidden (and auto-set to MASTER_LOCATION) when the destination is Master,
-// since Master only ever has the one location.
+// Hidden (and silently auto-assigned) whenever the destination only has
+// zero or one location — nothing to actually choose in that case.
 function qmRefreshLocation(){
   const bucket = document.getElementById("qm-dest").value;
-  const isMaster = bucket === MASTER;
   const label = document.getElementById("qm-location-label");
   const locSel = document.getElementById("qm-location");
-  if (label) label.style.display = isMaster ? "none" : "";
-  locSel.style.display = isMaster ? "none" : "";
   const locs = state.locations[bucket] || [];
+  const showPicker = locs.length > 1;
+  if (label) label.style.display = showPicker ? "" : "none";
+  locSel.style.display = showPicker ? "" : "none";
   const prev = locSel.value;
   locSel.innerHTML = locOptions(locs, locs.includes(prev) ? prev : (locs[0] || ""));
 }
@@ -3753,9 +3758,8 @@ document.getElementById("qm-move-btn").addEventListener("click", () => {
   }
 
   const dest = document.getElementById("qm-dest").value;
-  const isMaster = dest === MASTER;
-  const location = isMaster ? MASTER_LOCATION : document.getElementById("qm-location").value;
-  if (!isMaster && !location){
+  const location = document.getElementById("qm-location").value;
+  if (!location){
     feedback.textContent = `${dest} needs at least one location before you can move devices into it.`;
     feedback.className = "qm-feedback err";
     return;
