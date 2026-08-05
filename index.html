@@ -3416,6 +3416,19 @@ function nextPropId(){
   });
   return "p" + (max + 1);
 }
+// Props are quantity-based, not serialized — the same prop sitting in the
+// same project+location should always be one row with a combined quantity,
+// never two side-by-side rows that just split up the same stack (e.g.
+// moving 2 of 5 hats out and back should end up as 5 hats again, not a
+// "3" row and a separate "2" row). Match is case/whitespace-insensitive so
+// "Hat" and "hat " are still recognized as the same prop.
+function findMatchingPropRow(model, bucket, location, excludeId){
+  const key = String(model || "").trim().toLowerCase();
+  return state.props.find(p =>
+    p.id !== excludeId && p.bucket === bucket && p.location === location &&
+    String(p.model || "").trim().toLowerCase() === key
+  ) || null;
+}
 function openAddPropModal(bucket){
   document.getElementById("prop-bucket").innerHTML = destOptions(bucket);
   document.getElementById("prop-model").value = "";
@@ -3431,9 +3444,17 @@ document.getElementById("prop-save").onclick = () => {
   const bucket = document.getElementById("prop-bucket").value;
   const location = document.getElementById("prop-location").value;
   if (!model){ alert("Model / description is required."); return; }
-  const newId = nextPropId();
-  state.props.push({ id: newId, model, qty, bucket, location });
-  markEdited(newId);
+  // Stack onto an existing row for the same prop at this project+location
+  // rather than creating a second, distinct-looking pile of the same thing.
+  const existing = findMatchingPropRow(model, bucket, location, null);
+  if (existing){
+    existing.qty += qty;
+    markEdited(existing.id);
+  } else {
+    const newId = nextPropId();
+    state.props.push({ id: newId, model, qty, bucket, location });
+    markEdited(newId);
+  }
   save(); render();
   propModal.classList.remove("open");
 };
@@ -3483,18 +3504,36 @@ document.getElementById("move-prop-save").onclick = () => {
   if (qty > p.qty){ errEl.textContent = `Only ${p.qty} available to move.`; return; }
   if (destBucket === p.bucket && destLoc === p.location){ errEl.textContent = "Already there — pick a different project or location."; return; }
 
+  // If the same prop is already stacked at the destination, merge into that
+  // row instead of ending up with two side-by-side stacks of the same thing
+  // (e.g. moving 2 of 5 hats out and back should read as 5 hats again, not
+  // a separate "3" row and "2" row).
+  const existingAtDest = findMatchingPropRow(p.model, destBucket, destLoc, p.id);
+
   if (qty >= p.qty){
-    // Moving the entire remaining amount — just relocate this row, no split needed.
-    p.bucket = destBucket;
-    p.location = destLoc;
-    markEdited(p.id);
+    // Moving the entire remaining amount.
+    if (existingAtDest){
+      existingAtDest.qty += qty;
+      markEdited(existingAtDest.id);
+      state.props = state.props.filter(x => x.id !== p.id);
+    } else {
+      // No existing stack there — just relocate this row, no split needed.
+      p.bucket = destBucket;
+      p.location = destLoc;
+      markEdited(p.id);
+    }
   } else {
-    // Splitting: shrink the source row, create a new row for the moved amount.
+    // Splitting: shrink the source row either way.
     p.qty -= qty;
     markEdited(p.id);
-    const newId = nextPropId();
-    state.props.push({ id: newId, model: p.model, qty, bucket: destBucket, location: destLoc });
-    markEdited(newId);
+    if (existingAtDest){
+      existingAtDest.qty += qty;
+      markEdited(existingAtDest.id);
+    } else {
+      const newId = nextPropId();
+      state.props.push({ id: newId, model: p.model, qty, bucket: destBucket, location: destLoc });
+      markEdited(newId);
+    }
   }
   save(); render();
   movePropModal.classList.remove("open");
@@ -3624,16 +3663,17 @@ function qmRefreshDest(){
 // Keeps the required location picker in sync with whichever project is
 // currently selected as the move destination — moving somewhere always
 // requires picking a real location, same as adding a new device does.
-// Hidden (and silently auto-assigned) whenever the destination only has
-// zero or one location — nothing to actually choose in that case.
+// Unlike the Add modals, this ALWAYS stays visible (project + location both
+// shown) even when the destination only has one location — when you're
+// deliberately relocating an existing device you want to see exactly where
+// it's going, not have it silently auto-assigned.
 function qmRefreshLocation(){
   const bucket = document.getElementById("qm-dest").value;
   const label = document.getElementById("qm-location-label");
   const locSel = document.getElementById("qm-location");
   const locs = state.locations[bucket] || [];
-  const showPicker = locs.length > 1;
-  if (label) label.style.display = showPicker ? "" : "none";
-  locSel.style.display = showPicker ? "" : "none";
+  if (label) label.style.display = "";
+  locSel.style.display = "";
   const prev = locSel.value;
   locSel.innerHTML = locOptions(locs, locs.includes(prev) ? prev : (locs[0] || ""));
 }
