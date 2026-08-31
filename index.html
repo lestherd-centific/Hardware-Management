@@ -344,7 +344,18 @@
   .modal h3{margin-top:0;font-weight:600;}
   .modal label{display:block;font-size:12px;color:var(--sub);margin-top:10px;margin-bottom:4px;}
   .modal input,.modal select{width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--panel);color:var(--ink);}
+  .modal textarea{width:100%;padding:8px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;font-family:"SF Mono",Consolas,monospace;background:var(--panel);color:var(--ink);resize:vertical;box-sizing:border-box;}
   .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+  .bulk-summary{font-size:12.5px;color:var(--sub);margin-top:10px;}
+  .bulk-summary:empty{margin-top:0;}
+  .bulk-preview-list{max-height:260px;overflow-y:auto;margin-top:8px;}
+  .bulk-preview-list:empty{margin-top:0;}
+  .bulk-row{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12px;}
+  .bulk-row.ok{border-color:var(--st-inuse);background:var(--st-inuse-bg);}
+  .bulk-row.err{border-color:var(--st-broken);background:var(--st-broken-bg);}
+  .bulk-row-main{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--ink);}
+  .bulk-row-main span:first-child{font-weight:600;}
+  .bulk-row-errors{margin-top:4px;color:var(--st-broken);font-weight:600;}
   .suggest-wrap{position:relative;}
   .suggest-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.25);max-height:170px;overflow-y:auto;z-index:20;display:none;}
   .suggest-dropdown.open{display:block;}
@@ -556,8 +567,32 @@
     <button id="chooser-device-btn" class="chooser-btn" style="width:100%;text-align:left;"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0;"><rect x="6" y="6" width="12" height="12" rx="1.5"></rect><rect x="9" y="9" width="6" height="6" rx="0.5"></rect><line x1="9" y1="2" x2="9" y2="6"></line><line x1="12" y1="2" x2="12" y2="6"></line><line x1="15" y1="2" x2="15" y2="6"></line><line x1="9" y1="18" x2="9" y2="22"></line><line x1="12" y1="18" x2="12" y2="22"></line><line x1="15" y1="18" x2="15" y2="22"></line><line x1="2" y1="9" x2="6" y2="9"></line><line x1="2" y1="12" x2="6" y2="12"></line><line x1="2" y1="15" x2="6" y2="15"></line><line x1="18" y1="9" x2="22" y2="9"></line><line x1="18" y1="12" x2="22" y2="12"></line><line x1="18" y1="15" x2="22" y2="15"></line></svg> Hardware Device<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Laptops, tablets, and other tracked production hardware</span></button>
     <button id="chooser-accessory-btn" class="chooser-btn" style="width:100%;text-align:left;margin-top:8px;">🎒 Accessory<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Tripods, lux meters, and other lower-priority gear</span></button>
     <button id="chooser-prop-btn" class="chooser-btn" style="width:100%;text-align:left;margin-top:8px;">📦 Prop<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Regular props and consumables, tracked by quantity — no serial or DC tag</span></button>
+    <button id="chooser-bulk-btn" class="chooser-btn" style="width:100%;text-align:left;margin-top:8px;">📋 Bulk import devices<br><span style="font-weight:400;font-size:11.5px;opacity:.85;">Paste several devices at once from a spreadsheet</span></button>
     <div class="modal-actions">
       <button id="chooser-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="bulkAddBackdrop">
+  <div class="modal modal-wide">
+    <h3>Bulk import devices</h3>
+    <div class="qm-hint">
+      Paste rows copied straight from Excel (or comma-separated), one device per line, in this order:
+      <b>Asset Tag, Model, Serial Number, Status, Project, Location</b>. A header row is fine — it's
+      skipped automatically. Leave Status blank for "In stock". Leave Location blank to use the
+      project's first location. Project names must match an existing project exactly (e.g.
+      "Master Inventory") — this won't create new projects.
+    </div>
+    <textarea id="bulk-input" rows="10" placeholder="Tag&#9;Model&#9;Serial&#9;Status&#9;Project&#9;Location
+DC0A12&#9;Surface Laptop 6&#9;SN-88213&#9;&#9;Master Inventory&#9;
+DC0A13&#9;Surface Laptop 6&#9;SN-88214&#9;In use&#9;Project Alpha&#9;Site A"></textarea>
+    <div id="bulk-summary" class="bulk-summary"></div>
+    <div id="bulk-preview-list" class="bulk-preview-list"></div>
+    <div class="modal-actions">
+      <button id="bulk-cancel">Close</button>
+      <button id="bulk-preview-btn">Preview</button>
+      <button id="bulk-commit-btn" class="primary" style="display:none;">Add valid rows</button>
     </div>
   </div>
 </div>
@@ -3045,6 +3080,163 @@ document.getElementById("chooser-accessory-btn").onclick = () => {
 document.getElementById("chooser-prop-btn").onclick = () => {
   assetChooserModal.classList.remove("open");
   openAddPropModal(state.featured);
+};
+document.getElementById("chooser-bulk-btn").onclick = () => {
+  assetChooserModal.classList.remove("open");
+  openBulkAddModal();
+};
+
+// --- Bulk import devices ---------------------------------------------------
+// Lets someone paste many rows at once (straight from Excel, tab-separated,
+// or comma-separated) instead of using the single Add Device modal one at a
+// time. Reuses the exact same rules as that modal — model required, status
+// defaults to "In stock", location defaults to the project's first location,
+// serial numbers must be unique — so nothing added this way can end up in a
+// state the single-add flow wouldn't also allow.
+const bulkAddModal = document.getElementById("bulkAddBackdrop");
+function openBulkAddModal(){
+  document.getElementById("bulk-input").value = "";
+  document.getElementById("bulk-preview-list").innerHTML = "";
+  document.getElementById("bulk-summary").innerHTML = "";
+  document.getElementById("bulk-commit-btn").style.display = "none";
+  bulkAddModal.classList.add("open");
+}
+document.getElementById("bulk-cancel").onclick = () => bulkAddModal.classList.remove("open");
+
+// Splits pasted text into rows/cells. Tab-separated (the format Excel
+// produces when you copy cells) is tried first; falls back to a simple
+// comma split, which is good enough for plain asset-tag/model/serial data
+// without embedded commas. A leading header row is detected by column name
+// and dropped automatically.
+function parseBulkDeviceInput(raw){
+  const lines = String(raw || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const HEADER_WORDS = new Set(["tag","asset tag","model","serial","serial number","status","project","location"]);
+  const rows = lines.map(line => {
+    const cells = line.includes("\t") ? line.split("\t") : line.split(",");
+    return cells.map(c => c.trim().replace(/^"(.*)"$/, "$1"));
+  });
+  if (rows.length && rows[0].some(c => HEADER_WORDS.has(c.toLowerCase()))) rows.shift();
+  return rows;
+}
+
+// Validates one row against the same constraints the single Add Device
+// modal enforces. seenSerialsInBatch catches duplicates WITHIN the pasted
+// block itself, on top of the usual check against devices that already exist.
+function validateBulkDeviceRow(cells, seenSerialsInBatch){
+  const [tagRaw, modelRaw, serialRaw, statusRaw, projectRaw, locationRaw] = cells;
+  const tag = (tagRaw || "").trim();
+  const model = (modelRaw || "").trim();
+  const serial = (serialRaw || "").trim();
+  const statusKey = (statusRaw || "").trim().toLowerCase().replace(/[\s-]/g, "");
+  const projectIn = (projectRaw || "").trim();
+  const locationIn = (locationRaw || "").trim();
+  const errors = [];
+
+  if (!model) errors.push("Model is required.");
+
+  let status = "instock";
+  if (statusKey){
+    if (statusKey === "instock") status = "instock";
+    else if (statusKey === "inuse") status = "inuse";
+    else if (statusKey === "broken") status = "broken";
+    else errors.push(`Unrecognized status "${statusRaw}" — use In stock, In use, or Broken.`);
+  }
+
+  let bucket = MASTER;
+  if (projectIn){
+    const match = state.buckets.find(b => b.toLowerCase() === projectIn.toLowerCase());
+    if (match) bucket = match;
+    else errors.push(`Project "${projectIn}" doesn't match any existing project.`);
+  }
+
+  let location = "";
+  if (!errors.some(e => e.startsWith("Project"))){
+    const locs = state.locations[bucket] || [];
+    if (locationIn){
+      const locMatch = locs.find(l => l.toLowerCase() === locationIn.toLowerCase());
+      if (locMatch) location = locMatch;
+      else errors.push(`Location "${locationIn}" isn't one of ${bucket}'s locations (${locs.join(", ") || "none defined"}).`);
+    } else {
+      location = locs[0] || "";
+      if (!location) errors.push(`${bucket} has no locations defined.`);
+    }
+  }
+
+  if (serial && serial !== "—"){
+    const dupExisting = state.devices.find(d => d.serial && d.serial.trim().toLowerCase() === serial.toLowerCase());
+    if (dupExisting) errors.push(`Serial "${serial}" already belongs to ${dupExisting.model} in ${dupExisting.bucket}.`);
+    const dupKey = serial.toLowerCase();
+    if (seenSerialsInBatch.has(dupKey)) errors.push(`Serial "${serial}" is duplicated elsewhere in this paste.`);
+    seenSerialsInBatch.add(dupKey);
+  }
+
+  return { tag: tag || "—", model, serial: serial || "—", status, bucket, location, ok: errors.length === 0, errors };
+}
+
+function renderBulkPreview(results){
+  const listEl = document.getElementById("bulk-preview-list");
+  const commitBtn = document.getElementById("bulk-commit-btn");
+  if (results.length === 0){
+    listEl.innerHTML = "";
+    commitBtn.style.display = "none";
+    return;
+  }
+  listEl.innerHTML = results.map(r => `
+    <div class="bulk-row ${r.ok ? "ok" : "err"}">
+      <div class="bulk-row-main">
+        <span>${escapeHtmlCio(r.tag)}</span><span>${escapeHtmlCio(r.model || "(no model)")}</span>
+        <span>${escapeHtmlCio(r.serial)}</span><span>${r.status}</span>
+        <span>${escapeHtmlCio(r.bucket)}</span><span>${escapeHtmlCio(r.location || "—")}</span>
+      </div>
+      ${r.errors.length ? `<div class="bulk-row-errors">${r.errors.map(escapeHtmlCio).join("<br>")}</div>` : ""}
+    </div>
+  `).join("");
+  commitBtn.style.display = results.some(r => r.ok) ? "" : "none";
+}
+
+function parseAndValidateBulkInput(){
+  const rows = parseBulkDeviceInput(document.getElementById("bulk-input").value);
+  const seen = new Set();
+  return rows.map(cells => validateBulkDeviceRow(cells, seen));
+}
+
+document.getElementById("bulk-preview-btn").onclick = () => {
+  const results = parseAndValidateBulkInput();
+  const validCount = results.filter(r => r.ok).length;
+  document.getElementById("bulk-summary").innerHTML = results.length === 0
+    ? "Paste some rows above, then click Preview."
+    : `<b>${validCount} of ${results.length}</b> row${results.length === 1 ? "" : "s"} ready to add.` +
+      (validCount < results.length ? " Rows with errors are highlighted below — fix them above and preview again, or just add the valid ones now." : "");
+  renderBulkPreview(results);
+};
+
+document.getElementById("bulk-commit-btn").onclick = () => {
+  // Re-parses from the textarea rather than trusting whatever was last
+  // previewed, so this is always correct even if someone edits the box
+  // after previewing (or never previews at all).
+  const results = parseAndValidateBulkInput();
+  const valid = results.filter(r => r.ok);
+  const invalid = results.filter(r => !r.ok);
+  if (valid.length === 0){
+    document.getElementById("bulk-summary").innerHTML = "No rows were added — every row had an error. See below.";
+    renderBulkPreview(results);
+    return;
+  }
+  // One shared timestamp for the whole batch, with the row index appended,
+  // guarantees unique ids even though these are all created in the same tick.
+  const batchTs = Date.now();
+  valid.forEach((r, i) => {
+    const id = `${batchTs}-${i}`;
+    state.devices.push({ id, tag: r.tag, model: r.model, serial: r.serial, status: r.status, bucket: r.bucket, location: r.location, notes: [] });
+    logAddedDevice(id, r.tag, r.model, r.serial, r.bucket);
+  });
+  save(); render();
+  document.getElementById("bulk-input").value = "";
+  document.getElementById("bulk-summary").innerHTML = `Added <b>${valid.length}</b> device${valid.length === 1 ? "" : "s"}.` +
+    (invalid.length ? ` ${invalid.length} row${invalid.length === 1 ? "" : "s"} were skipped — fix and re-paste just those below.` : "");
+  // Only the rows still needing attention are worth showing after a
+  // successful commit — the added ones are done.
+  renderBulkPreview(invalid);
 };
 
 // Add device modal
