@@ -313,16 +313,23 @@
   .settings-loc-row .loc-del-btn{font-size:13px;}
 
   .sidebar{flex:1 1 38%;display:flex;flex-direction:column;gap:14px;min-width:0;}
-  .mini-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:grab;}
+  .mini-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;cursor:grab;transition:background .25s ease,border-color .25s ease;}
   .mini-card:active{cursor:grabbing;}
   .mini-card.card-dragover{outline:2px dashed var(--c-pink);outline-offset:-2px;}
-  .mini-card .panel-head{background:linear-gradient(90deg,var(--c-pink-soft),transparent);}
+  .mini-card .panel-head{background:linear-gradient(90deg,var(--c-pink-soft),transparent);transition:opacity .25s ease;}
   .mini-card .panel-head .tag{color:var(--c-pink);}
   .mini-card .count-pill{background:var(--c-pink);}
-  .mini-card .rows-list{max-height:260px;}
-  .mini-card.minimized .col-labels,.mini-card.minimized .rows-list,.mini-card.minimized .drop-target{display:none;}
+  .mini-card .rows-list{max-height:260px;overflow:hidden;transition:max-height .22s ease,opacity .18s ease;}
+  .mini-card .col-labels{overflow:hidden;max-height:60px;transition:max-height .22s ease,opacity .18s ease,padding .22s ease;}
+  .mini-card.minimized{background:var(--hover-bg);border-style:dashed;}
+  .mini-card.minimized .panel-head{opacity:.72;}
+  .mini-card.minimized .rows-list{max-height:0;opacity:0;}
+  .mini-card.minimized .col-labels{max-height:0;opacity:0;padding-top:0;padding-bottom:0;}
+  .mini-card-summary{display:none;font-size:11px;color:var(--sub);font-weight:600;margin-top:2px;}
+  .mini-card.minimized .mini-card-summary{display:inline-block;}
   .card-handle{color:var(--sub);opacity:.55;margin-right:4px;font-size:13px;}
-  .minimize-btn{font-size:12px;line-height:1;padding:5px 8px;}
+  .minimize-btn{font-size:12px;line-height:1;padding:5px 8px;display:inline-block;transition:transform .2s ease;}
+  .mini-card.minimized .minimize-btn{transform:rotate(-90deg);}
 
   aside.log{margin-top:20px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
   aside.log h3{margin:0 0 8px 0;font-size:13px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;}
@@ -2056,7 +2063,16 @@ function toggleMinimize(bucket){
   if (idx >= 0) state.minimized.splice(idx, 1);
   else state.minimized.push(bucket);
   save();
-  render();
+  // Toggle the existing card in place (rather than a full render()) so the
+  // collapse/expand CSS transition actually has something to animate from —
+  // replacing the whole sidebar's innerHTML would swap in an already-final
+  // element with no prior state to transition out of.
+  const isMin = state.minimized.includes(bucket);
+  const card = Array.from(document.querySelectorAll(".mini-card")).find(el => el.getAttribute("data-bucket") === bucket);
+  if (!card){ render(); return; }
+  card.classList.toggle("minimized", isMin);
+  const btn = card.querySelector(".minimize-btn");
+  if (btn) btn.title = isMin ? "Expand" : "Minimize";
 }
 
 // Lets sidebar mini-cards be dragged to reorder the sidebar. Uses a distinct
@@ -2413,9 +2429,10 @@ function render(){
           <div>
             <div class="tag"><span class="card-handle" title="Drag to reorder">⠿</span>${isMaster ? "Master" : "Project"}</div>
             <h2>${b}</h2>
+            <span class="mini-card-summary">${[showHW ? `${count} HW` : null, showAcc ? `${accCount} Acc` : null, showProps ? `${propCount} Props` : null].filter(Boolean).join(" · ")}</span>
           </div>
           <div class="head-actions">
-            <button class="icon-btn minimize-btn" data-bucket="${b}" title="${isMin ? "Expand" : "Minimize"}">${isMin ? "▸" : "▾"}</button>
+            <button class="icon-btn minimize-btn" data-bucket="${b}" title="${isMin ? "Expand" : "Minimize"}">▾</button>
             <button class="icon-btn settings-btn" data-bucket="${b}" title="Project settings">⚙</button>
             <button class="pin-btn" data-bucket="${b}">📌 Pin to main</button>
           </div>
