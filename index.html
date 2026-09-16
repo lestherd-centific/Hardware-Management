@@ -394,6 +394,7 @@
     <button id="exportBtn">Export JSON</button>
     <button id="importBtn">Import JSON</button>
     <input type="file" id="importFile" accept="application/json" style="display:none">
+    <button id="fedexTrackerBtn" title="Open the FedEx Label Tracker in a new tab">📦 FedEx Tracker</button>
     <button id="themeToggle" title="Toggle dark mode">🌙 Dark</button>
   </div>
 </header>
@@ -2811,19 +2812,33 @@ document.getElementById("md-tag-input").addEventListener("keydown", (e) => {
 });
 document.getElementById("md-close").addEventListener("click", () => modelDetailModal.classList.remove("open"));
 
-// Moves a device to a different bucket. Used by drag-drop and quick-move-by-serial.
+// Moves a device to a different bucket, and/or a different location within
+// the same bucket. Used by drag-drop and quick-move-by-serial.
 // location is optional — drag-drop omits it and gets auto-assigned the
 // destination's first location (Master included, now that it can have real
-// locations too); quick-move passes the location the user explicitly picked.
-// Either way, it's never blank.
+// locations too); quick-move always passes the location the user explicitly
+// picked. Either way, the resulting location is never blank.
 function dropInto(id, bucket, location){
   const d = state.devices.find(x => x.id === id);
-  if (!d || d.bucket === bucket) return;
+  if (!d) return;
+  // Drag-and-drop never specifies a location explicitly, since you can only
+  // drag onto a project card, not a specific location within it — so for
+  // that path, dropping onto the bucket a device is already in is a true
+  // no-op (don't silently reset its location to the bucket's first one).
+  // Quick Move always specifies an explicit location, so that case should
+  // go through even when the bucket itself isn't changing — e.g. relocating
+  // a device from Redmond to Las Vegas within the same project.
+  if (d.bucket === bucket && (!location || d.location === location)) return;
   const from = d.bucket;
+  const fromLocation = d.location;
   d.bucket = bucket;
   d.location = location || (state.locations[bucket] || [])[0] || "";
   markEdited(id);
-  logActivity({ ts: new Date().toLocaleString(), type: "move", tag: d.serial, deviceId: d.id, from, to: bucket });
+  if (from !== bucket){
+    logActivity({ ts: new Date().toLocaleString(), type: "move", tag: d.serial, deviceId: d.id, from, to: bucket });
+  } else {
+    logActivity({ ts: new Date().toLocaleString(), type: "location", tag: d.serial, deviceId: d.id, from: fromLocation || "Unassigned", to: d.location || "Unassigned" });
+  }
   save();
   render();
 }
@@ -3824,19 +3839,33 @@ document.getElementById("qm-move-btn").addEventListener("click", () => {
   const devices = qmTaggedIds.map(id => state.devices.find(x => x.id === id)).filter(Boolean);
   let movedCount = 0, alreadyCount = 0;
   devices.forEach(d => {
-    if (d.bucket === dest) alreadyCount++; else movedCount++;
+    // Check bucket AND location before mutating — a device can already be in
+    // the destination project but at a different location, which still
+    // counts as a real move (relocating within the same project).
+    const alreadyThere = d.bucket === dest && d.location === location;
+    if (alreadyThere) alreadyCount++; else movedCount++;
     dropInto(d.id, dest, location);
   });
 
+  // Always name the location, not just the project — otherwise relocating a
+  // device to a different location within the SAME project reads exactly
+  // like a no-op message ("Moved X to MM Waves") even though it worked.
   feedback.textContent = devices.length === 1
-    ? (movedCount ? `Moved ${devices[0].tag} (S/N ${devices[0].serial}) to ${dest}.` : `${devices[0].tag} is already in ${dest}.`)
-    : `Moved ${movedCount} device${movedCount === 1 ? "" : "s"} to ${dest}` + (alreadyCount ? ` (${alreadyCount} already there).` : ".");
+    ? (movedCount ? `Moved ${devices[0].tag} (S/N ${devices[0].serial}) to ${dest} — ${location}.` : `${devices[0].tag} is already in ${dest} — ${location}.`)
+    : `Moved ${movedCount} device${movedCount === 1 ? "" : "s"} to ${dest} — ${location}` + (alreadyCount ? ` (${alreadyCount} already there).` : ".");
   feedback.className = "qm-feedback ok";
 
   qmTaggedIds = [];
   qmRenderTags();
   input.value = "";
   document.getElementById("qm-suggestions").classList.remove("open");
+});
+
+// Separate site (own repo, own tracking) for FedEx shipping labels — this is
+// just a convenience shortcut to open it, not an integration; HW Tracker
+// never reads from or writes to it.
+document.getElementById("fedexTrackerBtn").addEventListener("click", () => {
+  window.open("https://lestherd-centific.github.io/fedexLabel_tracker/", "_blank", "noopener,noreferrer");
 });
 
 const THEME_KEY = "hw-tracker-theme";
