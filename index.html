@@ -261,6 +261,8 @@
   .dd-note-del{background:none;border:none;color:var(--st-broken);cursor:pointer;font-size:12px;opacity:.6;flex-shrink:0;}
   .dd-note-del:hover{opacity:1;}
   .dd-note-input{width:100%;min-height:60px;padding:8px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;resize:vertical;background:var(--panel);color:var(--ink);}
+  .dd-save-confirm{font-size:12px;font-weight:700;color:var(--c-violet);opacity:0;transition:opacity .2s ease;align-self:center;}
+  .dd-save-confirm.show{opacity:1;}
 
   .col-labels.full,.row.full{grid-template-columns:20px minmax(60px,1fr) minmax(70px,1.4fr) minmax(70px,1.4fr) 118px;}
   .col-labels.compact,.row.compact{grid-template-columns:18px minmax(50px,1fr) minmax(60px,1.2fr) 100px;}
@@ -823,7 +825,8 @@
     <textarea id="dd-note-input" class="dd-note-input" placeholder="Add a note, e.g. Device shipped back to Hong Kong for repairs"></textarea>
     <div class="modal-actions">
       <button id="dd-delete-device" style="margin-right:auto;background:var(--st-broken);border-color:var(--st-broken);color:#fff;">🗑 Delete device</button>
-      <button id="dd-add-note" class="primary">Add note</button>
+      <span id="dd-save-confirm" class="dd-save-confirm">✓ Saved</span>
+      <button id="dd-save-btn" class="primary">💾 Save</button>
     </div>
   </div>
 </div>
@@ -2895,15 +2898,10 @@ function openDeviceDetail(id){
     Currently in: <b>${d.bucket}</b><br>
     Kit: <input type="text" id="dd-kit-input" class="dd-kit-input" placeholder="Not part of a kit" value="${d.kit || ""}" title="Optional — group devices that are always used/checked out together, e.g. camera + mic + mmchip as 'Kit 1'.">
   `;
-  document.getElementById("dd-kit-input").addEventListener("change", (e) => {
-    const dev = state.devices.find(x => x.id === id);
-    if (!dev) return;
-    const newKit = e.target.value.trim();
-    if (dev.kit === newKit) return;
-    dev.kit = newKit;
-    markEdited(id);
-    save();
-  });
+  // Kit and any note text are committed together via the Save button below
+  // (not saved as-you-type/on-blur) so there's a single, unmistakable
+  // confirmation moment instead of a silent auto-save.
+  document.getElementById("dd-save-confirm").classList.remove("show");
 
   const history = state.log.filter(e => e.deviceId === id);
   const histEl = document.getElementById("dd-history");
@@ -3602,18 +3600,41 @@ document.getElementById("archive-confirm-ok").onclick = () => {
 // Device detail modal (history + notes)
 const deviceDetailModal = document.getElementById("deviceDetailBackdrop");
 document.getElementById("dd-close").onclick = () => deviceDetailModal.classList.remove("open");
-document.getElementById("dd-add-note").onclick = () => {
-  const input = document.getElementById("dd-note-input");
-  const text = input.value.trim();
-  if (!text || !deviceDetailId) return;
+// Single Save action for the device detail popup — commits both the Kit
+// field and any typed note together, and always shows a brief "Saved"
+// confirmation so it's never ambiguous whether an edit actually stuck
+// (previously the Kit field auto-saved silently on blur with no feedback).
+let ddSaveConfirmTimer = null;
+document.getElementById("dd-save-btn").onclick = () => {
+  if (!deviceDetailId) return;
   const d = state.devices.find(x => x.id === deviceDetailId);
   if (!d) return;
-  if (!d.notes) d.notes = [];
-  d.notes.unshift({ ts: new Date().toLocaleDateString(), text });
-  save();
-  renderNotesList(d);
-  input.value = "";
-  render();
+
+  const kitInput = document.getElementById("dd-kit-input");
+  const newKit = kitInput.value.trim();
+  const kitChanged = d.kit !== newKit;
+  if (kitChanged) d.kit = newKit;
+
+  const noteInput = document.getElementById("dd-note-input");
+  const noteText = noteInput.value.trim();
+  const addedNote = !!noteText;
+  if (addedNote){
+    if (!d.notes) d.notes = [];
+    d.notes.unshift({ ts: new Date().toLocaleDateString(), text: noteText });
+    noteInput.value = "";
+  }
+
+  if (kitChanged || addedNote){
+    markEdited(deviceDetailId);
+    save();
+    renderNotesList(d);
+    render();
+  }
+
+  const confirmEl = document.getElementById("dd-save-confirm");
+  confirmEl.classList.add("show");
+  clearTimeout(ddSaveConfirmTimer);
+  ddSaveConfirmTimer = setTimeout(() => confirmEl.classList.remove("show"), 1800);
 };
 
 // Delete device (from inside the history/notes popup) — confirm first since it can't be undone.
