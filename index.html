@@ -251,6 +251,7 @@
   .dd-meta{font-size:13px;color:var(--sub);line-height:1.8;margin:6px 0 16px;padding:10px 12px;background:var(--bg);border-radius:8px;}
   .dd-meta b{color:var(--ink);}
   .dd-status-chip{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;}
+  .dd-meta .dd-kit-input{width:auto;min-width:160px;display:inline-block;padding:3px 8px;font-size:12.5px;margin-left:2px;vertical-align:middle;}
   .dd-section-label{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;margin:0 0 6px;}
   .dd-list{max-height:170px;overflow-y:auto;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:2px 12px;}
   .dd-note-item{font-size:12.5px;color:var(--ink);padding:7px 0;border-bottom:1px dashed var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
@@ -293,6 +294,7 @@
   .row .cell.dd-open{cursor:pointer;text-decoration:underline;text-decoration-color:transparent;transition:text-decoration-color .1s;}
   .row .cell.dd-open:hover{text-decoration-color:currentColor;}
   .note-badge{font-size:10px;color:var(--c-violet);margin-left:3px;font-weight:600;}
+  .kit-badge{font-size:10px;color:var(--c-pink);margin-left:3px;font-weight:600;}
   .row .cell.sub{color:var(--sub);}
   .sortable-col{cursor:pointer;user-select:none;}
   .sortable-col:hover{color:var(--ink);}
@@ -628,6 +630,7 @@
     </div>
     <label>Asset tag (optional)</label><input id="d-tag" placeholder="e.g. RED-0142">
     <label>Serial number (optional)</label><input id="d-serial" placeholder="e.g. SN-88213">
+    <label>Kit (optional)</label><input id="d-kit" placeholder="e.g. Kit 1 — leave blank unless this is bundled with other devices">
     <label>Status</label>
     <select id="d-status"><option value="instock">In stock</option><option value="inuse">In use</option><option value="broken">Broken</option></select>
     <label>Project</label>
@@ -1113,6 +1116,11 @@ function normalizeState(){
   state.devices.forEach(d => {
     if (!d.notes) d.notes = [];
     if (typeof d.location !== "string") d.location = "";
+    // Optional grouping for devices that are physically bundled together
+    // (e.g. a camera + mic + mmchip that always travel as one kit). Blank
+    // means "not part of a kit" — most devices (MacBooks, SSDs, etc.) will
+    // always be blank here.
+    if (typeof d.kit !== "string") d.kit = "";
   });
   if (!state.accessories) state.accessories = [];
   // Locations are now shared between the Hardware and Accessories sections of a
@@ -1379,6 +1387,7 @@ function mergeRemoteDevices(rows){
       status: (r.status === "inuse" || r.status === "broken") ? r.status : "instock",
       bucket,
       location: String(r.location || ""),
+      kit: String(r.kit || ""),
       notes: parseNotesColumn(r.notes)
     };
   });
@@ -1493,7 +1502,7 @@ function computeFleetFingerprint(data){
     .sort()
     .join("\n");
   return [
-    norm(data.devices, ["id","tag","model","serial","status","bucket","location","tags","notes"]),
+    norm(data.devices, ["id","tag","model","serial","status","bucket","location","tags","notes","kit"]),
     norm(data.accessories, ["id","tag","model","serial","status","bucket","location","tags"]),
     norm(data.props, ["id","model","qty","bucket","location"]),
     norm(data.projects, ["name","archived","archivedAt"]),
@@ -1715,7 +1724,8 @@ async function doPushToExcel(){
       id: String(d.id || ""), tag: String(d.tag || ""), model: String(d.model || ""), serial: String(d.serial || ""),
       status: String(d.status || "instock"), bucket: String(d.bucket || ""), location: String(d.location || ""),
       tags: (state.modelTags[d.model] || []).join(";"),
-      notes: buildNotesColumn(d.notes)
+      notes: buildNotesColumn(d.notes),
+      kit: String(d.kit || "")
     }));
     const outgoingAccessories = state.accessories.map(a => ({
       id: String(a.id || ""), tag: String(a.tag || ""), model: String(a.model || ""), serial: String(a.serial || ""),
@@ -1961,7 +1971,7 @@ function rowHTML(d, compact, locs){
     <div class="row ${sizeClass}" draggable="true" data-id="${d.id}">
       <span class="handle">⋮⋮</span>
       <span class="cell serial dd-open" data-id="${d.id}" title="View history &amp; notes for ${d.serial}">${d.serial}</span>
-      <span class="cell tag" title="${d.tag}">${d.tag}${d.notes && d.notes.length ? `<span class="note-badge">📝${d.notes.length}</span>` : ""}</span>
+      <span class="cell tag" title="${d.tag}">${d.tag}${d.kit ? `<span class="kit-badge" title="Part of ${d.kit}">🧩${d.kit}</span>` : ""}${d.notes && d.notes.length ? `<span class="note-badge">📝${d.notes.length}</span>` : ""}</span>
       ${modelCell}
       <select class="status-select ${d.status}" data-id="${d.id}">
         <option value="instock" ${d.status==="instock"?"selected":""}>In stock</option>
@@ -2882,8 +2892,18 @@ function openDeviceDetail(id){
   document.getElementById("dd-meta").innerHTML = `
     Serial: <b>${d.serial}</b><br>
     Status: <span class="dd-status-chip status-select ${d.status}">${statusLabel(d.status)}</span><br>
-    Currently in: <b>${d.bucket}</b>
+    Currently in: <b>${d.bucket}</b><br>
+    Kit: <input type="text" id="dd-kit-input" class="dd-kit-input" placeholder="Not part of a kit" value="${d.kit || ""}" title="Optional — group devices that are always used/checked out together, e.g. camera + mic + mmchip as 'Kit 1'.">
   `;
+  document.getElementById("dd-kit-input").addEventListener("change", (e) => {
+    const dev = state.devices.find(x => x.id === id);
+    if (!dev) return;
+    const newKit = e.target.value.trim();
+    if (dev.kit === newKit) return;
+    dev.kit = newKit;
+    markEdited(id);
+    save();
+  });
 
   const history = state.log.filter(e => e.deviceId === id);
   const histEl = document.getElementById("dd-history");
@@ -3110,6 +3130,7 @@ document.getElementById("d-save").onclick = () => {
   const status = document.getElementById("d-status").value;
   const bucket = document.getElementById("d-bucket").value;
   const location = document.getElementById("d-location").value;
+  const kit = document.getElementById("d-kit").value.trim();
   if (!model){ alert("Model is required."); return; }
   // Serial number is the one thing that should be unique per physical
   // device — block adding a duplicate rather than letting it slip in.
@@ -3123,11 +3144,11 @@ document.getElementById("d-save").onclick = () => {
     }
   }
   const newId = Date.now().toString();
-  state.devices.push({ id: newId, tag: tag || "—", model, serial: serial || "—", status, bucket, location, notes: [] });
+  state.devices.push({ id: newId, tag: tag || "—", model, serial: serial || "—", status, bucket, location, kit, notes: [] });
   logAddedDevice(newId, tag || "—", model, serial || "—", bucket);
   save(); render();
   deviceModal.classList.remove("open");
-  ["d-tag","d-model","d-serial"].forEach(id => document.getElementById(id).value = "");
+  ["d-tag","d-model","d-serial","d-kit"].forEach(id => document.getElementById(id).value = "");
 };
 setupModelAutocomplete(document.getElementById("d-model"), document.getElementById("d-model-suggest"), existingHardwareModels);
 
