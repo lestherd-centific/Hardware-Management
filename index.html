@@ -178,10 +178,28 @@
   .cio-copy-btn:hover{border-color:var(--c-violet);color:var(--c-violet);}
   .cio-copy-btn.copied{border-color:var(--st-inuse);color:var(--st-inuse);}
 
-  .cio-mod-leaderboard{margin-top:6px;}
-  .cio-mod-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
-  .cio-mod-row:last-child{border-bottom:none;}
-  .cio-mod-row .qty{background:var(--c-violet-soft);color:var(--c-violet);border-radius:999px;padding:1px 10px;font-weight:700;font-size:12px;}
+  /* Project filter — narrows the whole Check-In/Out Activity tab (KPIs,
+     currently-checked-out list, condition chart, moderator status list) down
+     to a single project's activity, so leadership reviewing one production
+     isn't wading through everyone else's. */
+  .cio-project-filter-wrap{margin-bottom:16px;}
+  .cio-project-filter-wrap select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--panel));color:var(--ink);font-size:13px;font-family:inherit;margin-top:4px;}
+  .cio-project-filter-wrap select:focus{outline:none;border-color:var(--c-violet);}
+
+  /* Moderator status list — one row per added moderator, colored by
+     today's activity: grey (nothing today), yellow (currently holding
+     equipment, whether or not it went out today), green (used it today
+     and it's all back). Built to answer "who's using this and who isn't"
+     at a glance, without reading a chart. */
+  .cio-mod-status-list{margin-top:6px;}
+  .cio-mod-status-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.8px;}
+  .cio-mod-status-row:last-child{border-bottom:none;}
+  .cio-mod-status-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+  .cio-mod-status-dot.grey{background:var(--sub);opacity:.5;}
+  .cio-mod-status-dot.yellow{background:#d97706;}
+  .cio-mod-status-dot.green{background:#16a34a;}
+  .cio-mod-status-name{font-weight:600;flex:0 0 auto;min-width:110px;}
+  .cio-mod-status-detail{color:var(--sub);font-size:12px;text-align:right;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .model-table{width:100%;border-collapse:collapse;font-size:13px;}
   .model-table th{text-align:left;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;padding:6px 10px;border-bottom:1px solid var(--border);}
   .model-table th.num,.model-table td.num{text-align:right;}
@@ -498,6 +516,11 @@
         </div>
       </div>
 
+      <div class="cio-project-filter-wrap">
+        <div class="cio-section-label" style="margin-bottom:0;">Project</div>
+        <select id="cio-project-filter"></select>
+      </div>
+
       <div class="cio-search-wrap">
         <div class="cio-section-label">Find a device</div>
         <input type="text" id="cio-search-input" placeholder="Search by serial number or asset tag…" autocomplete="off">
@@ -511,33 +534,18 @@
         <div class="cio-mini-list" id="cio-mini-list"></div>
       </div>
 
+      <div class="cio-mini-widget">
+        <div class="cio-section-label" style="margin-bottom:0;">Moderator activity today</div>
+        <div class="cio-mod-status-list" id="cio-mod-status-list"></div>
+      </div>
+
       <div class="cio-charts">
-        <div>
-          <div class="cio-section-label">Checkouts vs check-ins, last 14 days</div>
-          <div class="cio-chart-legend">
-            <span><i style="background:#2563eb;"></i>Checkouts</span>
-            <span><i style="background:#ec4899;"></i>Check-ins</span>
-          </div>
-          <div style="position:relative;width:100%;height:220px;">
-            <canvas id="cioTrendChart" role="img" aria-label="Bar chart of daily checkouts and check-ins over the last 14 days"></canvas>
-          </div>
-        </div>
         <div>
           <div class="cio-section-label">Condition on return, last 30 days</div>
           <div style="position:relative;width:100%;height:180px;">
             <canvas id="cioCondChart" role="img" aria-label="Donut chart of returned-item condition over the last 30 days"></canvas>
           </div>
           <div class="cio-chart-legend" id="cio-cond-legend" style="margin-top:8px;"></div>
-        </div>
-        <div>
-          <div class="cio-section-label">Currently checked out, by project</div>
-          <div style="position:relative;width:100%;height:200px;">
-            <canvas id="cioProjectChart" role="img" aria-label="Bar chart of currently checked-out devices grouped by project"></canvas>
-          </div>
-        </div>
-        <div>
-          <div class="cio-section-label">Most active moderators, last 30 days</div>
-          <div class="cio-mod-leaderboard" id="cio-mod-leaderboard"></div>
         </div>
       </div>
     </div>
@@ -4053,9 +4061,8 @@ document.getElementById("themeToggle").addEventListener("click", () => {
   // Chart.js can't read CSS variables from canvas, so its colors are picked
   // at render time based on the theme attribute — redraw so a toggle takes
   // effect immediately instead of waiting for the next poll.
-  if (typeof renderCheckInOutDashboard === "function" && checkInOutLog.length >= 0 && document.getElementById("cioTrendChart")){
-    renderCioTrendChart();
-    if (typeof cioOpenCheckouts === "function") renderCioProjectChart(cioOpenCheckouts());
+  if (typeof renderCheckInOutDashboard === "function" && document.getElementById("cioCondChart")){
+    renderCheckInOutDashboard();
   }
 });
 
@@ -4090,6 +4097,13 @@ if (!authInfo) showAuthGate();
 // above, since there's nothing here to conflict with.
 // ---------------------------------------------------------------------------
 let checkInOutLog = [];
+// The full roster of added moderators (from the Credentials tab), so the
+// activity list below can show someone with zero history as "no activity"
+// instead of just omitting them — that absence is the whole point of the list.
+let checkInOutMods = [];
+// "" = all projects. Set by the Project filter dropdown; narrows the KPIs,
+// currently-checked-out list, condition chart, and moderator status list.
+let cioSelectedProject = "";
 
 async function loadCheckInOutData(){
   try {
@@ -4105,6 +4119,9 @@ async function loadCheckInOutData(){
       project: String(r.project || ""), location: String(r.location || ""),
       condition: String(r.condition || ""), notes: String(r.notes || "")
     })).filter(r => r.id);
+    checkInOutMods = (data.credentials || []).map(r => ({
+      name: String(r.name || ""), login: String(r.login || ""), role: String(r.role || "")
+    })).filter(m => m.name);
     renderCheckInOutDashboard();
   } catch (err){
     console.error("Check-in/out log load failed:", err);
@@ -4153,8 +4170,35 @@ function cioAgeLabel(ms){
   return hours < 24 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
 }
 
+// True if a log row belongs to the currently-selected project filter
+// ("" means all projects match).
+function cioMatchesSelectedProject(row){
+  return !cioSelectedProject || row.project === cioSelectedProject;
+}
+
+// Rebuilds the Project filter's options from every project name currently
+// known — both live ones (state.buckets) and any that only show up in
+// historical log rows (e.g. a project that's since been archived/renamed) —
+// while preserving whatever the user has selected, so a routine 25s refresh
+// doesn't silently reset their filter back to "All projects".
+function populateCioProjectFilter(){
+  const sel = document.getElementById("cio-project-filter");
+  if (!sel) return;
+  const names = new Set();
+  (state.buckets || []).forEach(b => { if (b !== MASTER) names.add(b); });
+  checkInOutLog.forEach(e => { if (e.project) names.add(e.project); });
+  const sorted = Array.from(names).sort((a, b) => a.localeCompare(b));
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">All projects</option>' +
+    sorted.map(n => `<option value="${escapeHtmlCio(n)}">${escapeHtmlCio(n)}</option>`).join("");
+  sel.value = sorted.includes(prev) ? prev : "";
+  cioSelectedProject = sel.value;
+}
+
 function renderCheckInOutDashboard(){
-  const open = cioOpenCheckouts();
+  populateCioProjectFilter();
+
+  const open = cioOpenCheckouts().filter(cioMatchesSelectedProject);
   const now = Date.now();
   const overdueMs = CHECKINOUT_OVERDUE_HOURS * 60 * 60 * 1000;
   const openWithAge = open.map(c => {
@@ -4165,10 +4209,10 @@ function renderCheckInOutDashboard(){
 
   const overdueCount = openWithAge.filter(c => c.overdue).length;
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
-  const checkins30d = checkInOutLog.filter(e => e.eventType === "checkin" && (parseCioTs(e.ts)?.getTime() || 0) >= thirtyDaysAgo);
+  const checkins30d = checkInOutLog.filter(e => cioMatchesSelectedProject(e) && e.eventType === "checkin" && (parseCioTs(e.ts)?.getTime() || 0) >= thirtyDaysAgo);
   const damaged30d = checkins30d.filter(e => e.condition === "Damaged").length;
   const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-  const activeMods7d = new Set(checkInOutLog.filter(e => (parseCioTs(e.ts)?.getTime() || 0) >= sevenDaysAgo).map(e => e.modName)).size;
+  const activeMods7d = new Set(checkInOutLog.filter(e => cioMatchesSelectedProject(e) && (parseCioTs(e.ts)?.getTime() || 0) >= sevenDaysAgo).map(e => e.modName)).size;
 
   document.getElementById("cio-kpis").innerHTML = `
     <div class="cio-kpi"><div class="cio-label">Currently checked out</div><div class="cio-value">${openWithAge.length}</div></div>
@@ -4177,12 +4221,81 @@ function renderCheckInOutDashboard(){
     <div class="cio-kpi"><div class="cio-label">Active mods, 7d</div><div class="cio-value">${activeMods7d}</div></div>
   `;
 
-  renderCioTrendChart();
   renderCioConditionChart(checkins30d);
   renderCioMiniList(openWithAge);
-  renderCioProjectChart(openWithAge);
-  renderCioModLeaderboard(checkInOutLog.filter(e => (parseCioTs(e.ts)?.getTime() || 0) >= thirtyDaysAgo));
+  renderCioModStatusList();
   renderCioSearchResult();
+}
+
+// One row per known moderator (added via Credentials, or anyone who's ever
+// shown up in the log), colored by today's activity:
+//   yellow — currently holding equipment (an open, not-yet-checked-in item),
+//            regardless of which day it went out
+//   green  — no open items, but logged a checkout or checkin today
+//   grey   — no activity at all today
+// Respects the Project filter: with a project selected, only that project's
+// open items/today's events count toward a mod's status.
+function renderCioModStatusList(){
+  const el = document.getElementById("cio-mod-status-list");
+  if (!el) return;
+
+  const todayKey = new Date().toDateString();
+  const openByMod = {};
+  cioOpenCheckouts().filter(cioMatchesSelectedProject).forEach(c => {
+    (openByMod[c.modName] = openByMod[c.modName] || []).push(c);
+  });
+  const todayByMod = {};
+  checkInOutLog.filter(e => cioMatchesSelectedProject(e) && parseCioTs(e.ts)?.toDateString() === todayKey).forEach(e => {
+    (todayByMod[e.modName] = todayByMod[e.modName] || []).push(e);
+  });
+
+  const names = new Set(checkInOutMods.map(m => m.name));
+  checkInOutLog.forEach(e => { if (e.modName) names.add(e.modName); });
+
+  const rows = Array.from(names).filter(Boolean).map(name => {
+    const open = (openByMod[name] || []).slice().sort((a, b) => (parseCioTs(a.ts)?.getTime() || 0) - (parseCioTs(b.ts)?.getTime() || 0));
+    const today = (todayByMod[name] || []).slice().sort((a, b) => (parseCioTs(a.ts)?.getTime() || 0) - (parseCioTs(b.ts)?.getTime() || 0));
+    const status = open.length ? "yellow" : (today.length ? "green" : "grey");
+    return { name, status, open, today };
+  });
+
+  if (rows.length === 0){
+    el.innerHTML = '<div class="cio-empty">No moderators added yet.</div>';
+    return;
+  }
+
+  const statusOrder = { yellow: 0, green: 1, grey: 2 };
+  rows.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.name.localeCompare(b.name));
+
+  const timeFmt = (ts) => {
+    const d = parseCioTs(ts);
+    return d ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
+  };
+
+  el.innerHTML = rows.map(r => {
+    let detail;
+    if (r.status === "yellow"){
+      detail = r.open.map(c => `Out ${timeFmt(c.ts)}${c.project ? ` · ${c.project}` : ""}`).join(", ");
+    } else if (r.status === "green"){
+      detail = r.today.map(e => `${e.eventType === "checkout" ? "Out" : "In"} ${timeFmt(e.ts)}`).join(", ");
+    } else {
+      detail = "No activity today";
+    }
+    return `
+    <div class="cio-mod-status-row">
+      <span class="cio-mod-status-dot ${r.status}"></span>
+      <span class="cio-mod-status-name">${escapeHtmlCio(r.name)}</span>
+      <span class="cio-mod-status-detail">${escapeHtmlCio(detail)}</span>
+    </div>`;
+  }).join("");
+}
+
+const cioProjectFilterEl = document.getElementById("cio-project-filter");
+if (cioProjectFilterEl){
+  cioProjectFilterEl.addEventListener("change", () => {
+    cioSelectedProject = cioProjectFilterEl.value;
+    renderCheckInOutDashboard();
+  });
 }
 
 // The one "currently checked out" list in the Check-In/Out Activity tab —
@@ -4309,102 +4422,8 @@ if (cioShareCopyBtn){
   });
 }
 
-// Bar chart of currently checked-out devices grouped by project — gives
-// leadership a sense of which productions are holding the most gear right
-// now, not just a raw total.
-let cioProjectChartInstance = null;
-function renderCioProjectChart(openWithAge){
-  const canvas = document.getElementById("cioProjectChart");
-  if (!canvas) return;
-  const counts = {};
-  openWithAge.forEach(c => {
-    const key = c.project || "(unknown)";
-    counts[key] = (counts[key] || 0) + 1;
-  });
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-  const gridColor = isDark ? "#33314a" : "#e7e3f0";
-  const tickColor = isDark ? "#9c98b0" : "#68657a";
-  if (cioProjectChartInstance) cioProjectChartInstance.destroy();
-  cioProjectChartInstance = new Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: entries.map(e => e[0]),
-      datasets: [{ data: entries.map(e => e[1]), backgroundColor: "#7c3aed", borderRadius: 3 }]
-    },
-    options: {
-      indexAxis: "y",
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: tickColor, font: { size: 11 }, precision: 0 }, grid: { color: gridColor } },
-        y: { ticks: { color: tickColor, font: { size: 11 } }, grid: { display: false } }
-      }
-    }
-  });
-}
-
-// Simple leaderboard, not a chart — top moderators by number of check-in/out
-// events logged in the last 30 days.
-function renderCioModLeaderboard(events30d){
-  const el = document.getElementById("cio-mod-leaderboard");
-  if (!el) return;
-  const counts = {};
-  events30d.forEach(e => {
-    if (!e.modName) return;
-    counts[e.modName] = (counts[e.modName] || 0) + 1;
-  });
-  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (entries.length === 0){
-    el.innerHTML = '<div class="cio-empty">No activity in the last 30 days.</div>';
-    return;
-  }
-  el.innerHTML = entries.map(([name, qty]) =>
-    `<div class="cio-mod-row"><span>${escapeHtmlCio(name)}</span><span class="qty">${qty}</span></div>`
-  ).join("");
-}
-
 function escapeHtmlCio(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
-}
-
-let cioTrendChartInstance = null;
-function renderCioTrendChart(){
-  const days = [];
-  const checkoutCounts = [];
-  const checkinCounts = [];
-  const now = new Date();
-  for (let i = 13; i >= 0; i--){
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    const dayKey = d.toDateString();
-    days.push(label);
-    checkoutCounts.push(checkInOutLog.filter(e => e.eventType === "checkout" && parseCioTs(e.ts)?.toDateString() === dayKey).length);
-    checkinCounts.push(checkInOutLog.filter(e => e.eventType === "checkin" && parseCioTs(e.ts)?.toDateString() === dayKey).length);
-  }
-  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-  const gridColor = isDark ? "#33314a" : "#e7e3f0";
-  const tickColor = isDark ? "#9c98b0" : "#68657a";
-  if (cioTrendChartInstance) cioTrendChartInstance.destroy();
-  cioTrendChartInstance = new Chart(document.getElementById("cioTrendChart"), {
-    type: "bar",
-    data: {
-      labels: days,
-      datasets: [
-        { label: "Checkouts", data: checkoutCounts, backgroundColor: "#2563eb", borderRadius: 3 },
-        { label: "Check-ins", data: checkinCounts, backgroundColor: "#ec4899", borderRadius: 3 }
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: tickColor, font: { size: 11 } }, grid: { display: false } },
-        y: { ticks: { color: tickColor, font: { size: 11 }, precision: 0 }, grid: { color: gridColor } }
-      }
-    }
-  });
 }
 
 let cioCondChartInstance = null;
