@@ -200,6 +200,14 @@
   .cio-mod-status-dot.green{background:#16a34a;}
   .cio-mod-status-name{font-weight:600;flex:0 0 auto;min-width:110px;}
   .cio-mod-status-detail{color:var(--sub);font-size:12px;text-align:right;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+  /* Damaged-on-return list under the condition donut — newest first, so
+     whoever's checking this knows what to look into first. */
+  .cio-damaged-list{margin-top:12px;max-height:220px;overflow-y:auto;}
+  .cio-damaged-row{padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
+  .cio-damaged-row:last-child{border-bottom:none;}
+  .cio-damaged-row .top{display:flex;justify-content:space-between;gap:8px;font-weight:600;color:var(--st-broken);}
+  .cio-damaged-row .meta{color:var(--sub);font-size:11.5px;margin-top:2px;}
   .model-table{width:100%;border-collapse:collapse;font-size:13px;}
   .model-table th{text-align:left;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;padding:6px 10px;border-bottom:1px solid var(--border);}
   .model-table th.num,.model-table td.num{text-align:right;}
@@ -546,6 +554,7 @@
             <canvas id="cioCondChart" role="img" aria-label="Donut chart of returned-item condition over the last 30 days"></canvas>
           </div>
           <div class="cio-chart-legend" id="cio-cond-legend" style="margin-top:8px;"></div>
+          <div class="cio-damaged-list" id="cio-damaged-list"></div>
         </div>
       </div>
     </div>
@@ -4222,9 +4231,35 @@ function renderCheckInOutDashboard(){
   `;
 
   renderCioConditionChart(checkins30d);
+  renderCioDamagedList(checkins30d);
   renderCioMiniList(openWithAge);
   renderCioModStatusList();
   renderCioSearchResult();
+}
+
+// Every check-in marked Damaged in the last 30 days (respecting the Project
+// filter), newest first — device, serial, who handled it, and when — so a
+// damaged-condition percentage on the donut can be traced back to specifics
+// without digging through the raw log.
+function renderCioDamagedList(checkins30d){
+  const el = document.getElementById("cio-damaged-list");
+  if (!el) return;
+  const damaged = checkins30d
+    .filter(e => e.condition === "Damaged")
+    .slice()
+    .sort((a, b) => (parseCioTs(b.ts)?.getTime() || 0) - (parseCioTs(a.ts)?.getTime() || 0));
+  if (damaged.length === 0){
+    el.innerHTML = "";
+    return;
+  }
+  el.innerHTML = damaged.map(e => `
+    <div class="cio-damaged-row">
+      <div class="top">
+        <span>${escapeHtmlCio(e.model)}${e.serial ? ` · S/N ${escapeHtmlCio(e.serial)}` : ""}</span>
+        <span>${escapeHtmlCio(e.ts)}</span>
+      </div>
+      <div class="meta">Handled by ${escapeHtmlCio(e.modName || "(unknown)")}${e.tag ? ` · ${escapeHtmlCio(e.tag)}` : ""}${e.project ? ` · ${escapeHtmlCio(e.project)}` : ""}</div>
+    </div>`).join("");
 }
 
 // One row per known moderator (added via Credentials, or anyone who's ever
