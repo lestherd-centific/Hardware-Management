@@ -187,12 +187,17 @@
   .cio-project-filter-wrap select:focus{outline:none;border-color:var(--c-violet);}
 
   /* Moderator activity timeline — one row per moderator, x-axis is time of
-     day for whichever day is selected via the ‹/› day-picker. Each row is
-     grey by default, turns yellow the instant that mod checks something
-     out, and turns green the instant they check it back in — so a glance
-     across rows shows who's holding gear right now vs. who's clear, and
-     stepping back a day shows the same story for any prior day. */
-  .cio-timeline-head{display:flex;justify-content:space-between;align-items:center;}
+     day for whichever day is selected via the ‹/› day-picker. A thin grey
+     baseline runs the length of the row; a yellow dot appears at the exact
+     moment that mod checks something out, a green dot at the exact moment
+     they check it back in — hover a dot for the precise timestamp. Defaults
+     to a 7 AM–12 AM window (the "Show full 24 hours" checkbox reveals
+     anything outside it); a small clock badge on a name flags activity
+     that's currently hidden by that window. */
+  .cio-timeline-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}
+  .cio-timeline-controls{display:flex;align-items:center;gap:14px;}
+  .cio-timeline-checkbox{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--sub);cursor:pointer;white-space:nowrap;}
+  .cio-timeline-checkbox input{margin:0;cursor:pointer;}
   .cio-timeline-nav{display:flex;align-items:center;gap:8px;}
   .cio-timeline-day-label{font-size:12.5px;font-weight:600;min-width:64px;text-align:center;}
   .cio-timeline-nav button{padding:3px 10px;font-size:13px;line-height:1.4;}
@@ -201,18 +206,23 @@
   .cio-timeline-axis span{position:absolute;transform:translateX(-50%);}
   .cio-timeline-axis span:first-child{transform:translateX(0);}
   .cio-timeline-axis span:last-child{transform:translateX(-100%);}
-  .cio-timeline-list{max-height:280px;overflow-y:auto;}
-  .cio-timeline-row{display:flex;align-items:center;gap:10px;padding:5px 0;}
+  .cio-timeline-list{max-height:300px;overflow-y:visible;}
+  .cio-timeline-row{display:flex;align-items:center;gap:10px;padding:9px 0;}
   .cio-timeline-name{width:100px;flex:0 0 100px;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .cio-timeline-track{position:relative;flex:1;height:14px;background:var(--hover-bg);border-radius:3px;overflow:hidden;}
-  .cio-timeline-seg{position:absolute;top:0;bottom:0;}
-  .cio-timeline-seg.grey{background:var(--sub);opacity:.35;}
-  .cio-timeline-seg.yellow{background:#d97706;}
-  .cio-timeline-seg.green{background:#16a34a;}
+  .cio-timeline-offhours{font-size:10px;cursor:help;margin-left:2px;}
+  .cio-timeline-track{position:relative;flex:1;height:18px;}
+  .cio-timeline-baseline{position:absolute;left:0;right:0;top:50%;height:3px;border-radius:2px;background:var(--sub);opacity:.3;transform:translateY(-50%);}
+  .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;}
+  .cio-timeline-dot.yellow{background:#d97706;}
+  .cio-timeline-dot.green{background:#16a34a;}
+  .cio-timeline-dot::after{content:attr(data-tip);position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--panel);font-size:10.5px;font-weight:600;padding:4px 8px;border-radius:5px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .1s;z-index:5;}
+  .cio-timeline-dot:hover{z-index:6;}
+  .cio-timeline-dot:hover::after{opacity:1;}
   .cio-timeline-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--c-violet);}
   .cio-timeline-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--sub);}
   .cio-timeline-legend span{display:inline-flex;align-items:center;gap:5px;}
-  .cio-timeline-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}
+  .cio-timeline-legend i{width:9px;height:9px;border-radius:50%;display:inline-block;}
+  .cio-timeline-legend i.base{border-radius:2px;opacity:.5;}
 
   /* Damaged-on-return list under the condition donut — newest first, so
      whoever's checking this knows what to look into first. */
@@ -558,17 +568,20 @@
       <div class="cio-mini-widget">
         <div class="cio-timeline-head">
           <div class="cio-section-label" style="margin-bottom:0;">Moderator activity</div>
-          <div class="cio-timeline-nav">
-            <button id="cio-day-prev" class="cio-copy-btn" type="button" title="Previous day">‹</button>
-            <span class="cio-timeline-day-label" id="cio-day-label"></span>
-            <button id="cio-day-next" class="cio-copy-btn" type="button" title="Next day">›</button>
+          <div class="cio-timeline-controls">
+            <label class="cio-timeline-checkbox"><input type="checkbox" id="cio-timeline-full-day"> Show full 24 hours</label>
+            <div class="cio-timeline-nav">
+              <button id="cio-day-prev" class="cio-copy-btn" type="button" title="Previous day">‹</button>
+              <span class="cio-timeline-day-label" id="cio-day-label"></span>
+              <button id="cio-day-next" class="cio-copy-btn" type="button" title="Next day">›</button>
+            </div>
           </div>
         </div>
         <div class="cio-timeline-axis" id="cio-timeline-axis"></div>
         <div class="cio-timeline-list" id="cio-timeline-list"></div>
         <div class="cio-timeline-legend">
-          <span><i style="background:var(--sub);opacity:.35;"></i>No equipment out</span>
-          <span><i style="background:#d97706;"></i>Checked out</span>
+          <span><i class="base" style="background:var(--sub);"></i>No equipment out</span>
+          <span><i style="background:#d97706;"></i>Checked out (hover a dot for the time)</span>
           <span><i style="background:#16a34a;"></i>Checked back in</span>
         </div>
       </div>
@@ -968,7 +981,7 @@ const ICON_HW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" str
 // closing exactly the gap that let an old, unpatched tab keep silently
 // wiping Excel even after lastKnownGoodCounts/looksLikeBrokenEmptyRead were
 // added to fix that failure mode for any *newly loaded* tab.
-const APP_VERSION = "2026-09-18-2";
+const APP_VERSION = "2026-09-18-3";
 let versionStale = false;
 
 const EXCEL_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
@@ -4344,6 +4357,16 @@ function cioShiftTimelineDay(delta){
   cioTimelineDate = next;
   renderCioModTimeline();
 }
+// Default window is 7 AM–12 AM (most real activity), so a normal day isn't
+// squeezed into a sliver of the axis. The checkbox reveals the full 24
+// hours for anyone whose activity falls outside that window.
+let cioTimelineFullDay = false;
+function cioFormatHourLabel(hour){
+  const h = Math.round(hour) % 24;
+  if (h === 0) return "12am";
+  if (h === 12) return "12pm";
+  return h < 12 ? `${h}am` : `${h - 12}pm`;
+}
 
 // Every check-in marked Damaged in the last 30 days (respecting the Project
 // filter), newest first — device, serial, who handled it, and when — so a
@@ -4370,13 +4393,14 @@ function renderCioDamagedList(checkins30d){
     </div>`).join("");
 }
 
-// A per-moderator, per-day timeline: each row starts grey (day boundary at
-// midnight), turns yellow the instant that mod's checkout event lands, and
-// turns green the instant their matching checkin lands — visually replaying
-// the day's check-out/check-in activity along a 24-hour axis, rather than
-// collapsing it down to a single end-of-day status. Respects the Project
-// filter (only that project's events count) and the day picked via the
-// ‹/› buttons (cioTimelineDate, never later than today).
+// A per-moderator, per-day timeline: a dot lands at the exact moment that
+// mod's checkout event happened (yellow) or their matching checkin happened
+// (green), against a plain grey baseline — hover a dot for the exact time.
+// Defaults to a 7 AM–12 AM window (cioTimelineFullDay toggles the full 24h);
+// anything outside the visible window still gets a small badge on that
+// mod's name rather than silently vanishing. Respects the Project filter
+// and the day picked via the ‹/› buttons (cioTimelineDate, never later
+// than today).
 function renderCioModTimeline(){
   const listEl = document.getElementById("cio-timeline-list");
   const axisEl = document.getElementById("cio-timeline-axis");
@@ -4390,14 +4414,25 @@ function renderCioModTimeline(){
 
   labelEl.textContent = today ? "Today" : cioTimelineDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   if (nextBtn) nextBtn.disabled = today;
-  axisEl.innerHTML = ["12am", "6am", "12pm", "6pm", "12am"].map((t, i) => `<span style="left:calc(100px + (100% - 100px) * ${i / 4});">${t}</span>`).join("");
 
-  const nowFrac = today ? Math.min(1, (Date.now() - dayStart) / 86400000) : 1;
+  const axisStartHour = cioTimelineFullDay ? 0 : 7;
+  const axisEndHour = 24;
+  const axisStartFrac = axisStartHour / 24;
+  const axisEndFrac = axisEndHour / 24;
+  const axisSpan = axisEndHour - axisStartHour;
+  axisEl.innerHTML = [0, 1, 2, 3, 4]
+    .map(i => axisStartHour + (axisSpan * i / 4))
+    .map((h, i) => `<span style="left:calc(100px + (100% - 100px) * ${i / 4});">${cioFormatHourLabel(h)}</span>`)
+    .join("");
+
+  const nowRawFrac = (Date.now() - dayStart) / 86400000;
+  const nowAxisFrac = (nowRawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
+  const showNowMarker = today && nowAxisFrac >= 0 && nowAxisFrac <= 1;
 
   // All matching-project events, grouped by moderator and time-sorted —
-  // used both to simulate the state a mod was already in at this day's
-  // midnight (an item checked out on a prior day and still out) and to
-  // walk forward through this day's own events.
+  // used both to check whether a mod was already holding equipment at this
+  // day's midnight (checked out on a prior day, still not returned) and to
+  // place a dot for each of this day's own events.
   const byMod = {};
   checkInOutLog.filter(cioMatchesSelectedProject).forEach(e => {
     const t = parseCioTs(e.ts);
@@ -4414,34 +4449,46 @@ function renderCioModTimeline(){
     return;
   }
 
+  const timeFmt = (ts) => {
+    const d = parseCioTs(ts);
+    return d ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : ts;
+  };
+
   const rows = Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b)).map(name => {
     const events = byMod[name] || [];
-    let openCount = 0;
+    let openCountAtDayStart = 0;
+    let lastOpenTs = null;
     events.forEach(e => {
       if (e.tMs >= dayStart) return;
-      if (e.eventType === "checkout") openCount++;
-      else if (e.eventType === "checkin") openCount = Math.max(0, openCount - 1);
+      if (e.eventType === "checkout"){ openCountAtDayStart++; lastOpenTs = e.ts; }
+      else if (e.eventType === "checkin") openCountAtDayStart = Math.max(0, openCountAtDayStart - 1);
     });
-    let color = openCount > 0 ? "yellow" : "grey";
-    let segStart = 0;
-    const segments = [];
+
+    const dots = [];
+    let hasOffWindow = false;
+    if (openCountAtDayStart > 0){
+      // Already holding equipment as of midnight — pin a marker at the
+      // very start of the visible axis instead of dropping it, since no
+      // NEW event happens today to place a dot at.
+      dots.push({ frac: 0, color: "yellow", label: `Still out — checked out ${lastOpenTs ? timeFmt(lastOpenTs) : "earlier"}` });
+    }
     events.filter(e => e.tMs >= dayStart && e.tMs < dayEnd).forEach(e => {
-      const frac = (e.tMs - dayStart) / 86400000;
-      if (frac > segStart) segments.push({ start: segStart, end: frac, color });
-      if (e.eventType === "checkout"){ openCount++; color = "yellow"; }
-      else if (e.eventType === "checkin"){ openCount = Math.max(0, openCount - 1); color = openCount > 0 ? "yellow" : "green"; }
-      segStart = frac;
+      const rawFrac = (e.tMs - dayStart) / 86400000;
+      const axisFrac = (rawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
+      const label = `${e.eventType === "checkout" ? "Checked out" : "Checked back in"} ${timeFmt(e.ts)}${e.model ? " · " + e.model : ""}`;
+      if (axisFrac < 0 || axisFrac > 1){ hasOffWindow = true; return; }
+      dots.push({ frac: axisFrac, color: e.eventType === "checkout" ? "yellow" : "green", label });
     });
-    if (nowFrac > segStart) segments.push({ start: segStart, end: nowFrac, color });
-    return { name, segments };
+    return { name, dots, hasOffWindow };
   });
 
   listEl.innerHTML = rows.map(r => `
     <div class="cio-timeline-row">
-      <span class="cio-timeline-name">${escapeHtmlCio(r.name)}</span>
+      <span class="cio-timeline-name">${escapeHtmlCio(r.name)}${r.hasOffWindow ? ` <span class="cio-timeline-offhours" title="Has activity outside the hours shown — check &quot;Show full 24 hours&quot;">⏱</span>` : ""}</span>
       <div class="cio-timeline-track">
-        ${r.segments.map(s => `<span class="cio-timeline-seg ${s.color}" style="left:${(s.start * 100).toFixed(3)}%;width:${((s.end - s.start) * 100).toFixed(3)}%;"></span>`).join("")}
-        ${today ? `<span class="cio-timeline-now" style="left:${(nowFrac * 100).toFixed(3)}%;"></span>` : ""}
+        <div class="cio-timeline-baseline"></div>
+        ${r.dots.map(d => `<span class="cio-timeline-dot ${d.color}" style="left:${(d.frac * 100).toFixed(3)}%;" data-tip="${escapeHtmlCio(d.label)}"></span>`).join("")}
+        ${showNowMarker ? `<span class="cio-timeline-now" style="left:${(nowAxisFrac * 100).toFixed(3)}%;"></span>` : ""}
       </div>
     </div>`).join("");
 }
@@ -4457,6 +4504,13 @@ const cioDayPrevEl = document.getElementById("cio-day-prev");
 const cioDayNextEl = document.getElementById("cio-day-next");
 if (cioDayPrevEl) cioDayPrevEl.addEventListener("click", () => cioShiftTimelineDay(-1));
 if (cioDayNextEl) cioDayNextEl.addEventListener("click", () => cioShiftTimelineDay(1));
+const cioTimelineFullDayEl = document.getElementById("cio-timeline-full-day");
+if (cioTimelineFullDayEl){
+  cioTimelineFullDayEl.addEventListener("change", () => {
+    cioTimelineFullDay = cioTimelineFullDayEl.checked;
+    renderCioModTimeline();
+  });
+}
 
 // The one "currently checked out" list in the Check-In/Out Activity tab —
 // grouped by moderator (e.g. "Lesther (4)"), expand a name to see each
