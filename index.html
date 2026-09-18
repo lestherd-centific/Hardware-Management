@@ -186,20 +186,33 @@
   .cio-project-filter-wrap select{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input-bg,var(--panel));color:var(--ink);font-size:13px;font-family:inherit;margin-top:4px;}
   .cio-project-filter-wrap select:focus{outline:none;border-color:var(--c-violet);}
 
-  /* Moderator status list — one row per added moderator, colored by
-     today's activity: grey (nothing today), yellow (currently holding
-     equipment, whether or not it went out today), green (used it today
-     and it's all back). Built to answer "who's using this and who isn't"
-     at a glance, without reading a chart. */
-  .cio-mod-status-list{margin-top:6px;}
-  .cio-mod-status-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12.8px;}
-  .cio-mod-status-row:last-child{border-bottom:none;}
-  .cio-mod-status-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
-  .cio-mod-status-dot.grey{background:var(--sub);opacity:.5;}
-  .cio-mod-status-dot.yellow{background:#d97706;}
-  .cio-mod-status-dot.green{background:#16a34a;}
-  .cio-mod-status-name{font-weight:600;flex:0 0 auto;min-width:110px;}
-  .cio-mod-status-detail{color:var(--sub);font-size:12px;text-align:right;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  /* Moderator activity timeline — one row per moderator, x-axis is time of
+     day for whichever day is selected via the ‹/› day-picker. Each row is
+     grey by default, turns yellow the instant that mod checks something
+     out, and turns green the instant they check it back in — so a glance
+     across rows shows who's holding gear right now vs. who's clear, and
+     stepping back a day shows the same story for any prior day. */
+  .cio-timeline-head{display:flex;justify-content:space-between;align-items:center;}
+  .cio-timeline-nav{display:flex;align-items:center;gap:8px;}
+  .cio-timeline-day-label{font-size:12.5px;font-weight:600;min-width:64px;text-align:center;}
+  .cio-timeline-nav button{padding:3px 10px;font-size:13px;line-height:1.4;}
+  .cio-timeline-nav button:disabled{opacity:.35;cursor:default;}
+  .cio-timeline-axis{position:relative;height:14px;margin:10px 0 2px;padding-left:100px;font-size:10px;color:var(--sub);}
+  .cio-timeline-axis span{position:absolute;transform:translateX(-50%);}
+  .cio-timeline-axis span:first-child{transform:translateX(0);}
+  .cio-timeline-axis span:last-child{transform:translateX(-100%);}
+  .cio-timeline-list{max-height:280px;overflow-y:auto;}
+  .cio-timeline-row{display:flex;align-items:center;gap:10px;padding:5px 0;}
+  .cio-timeline-name{width:100px;flex:0 0 100px;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cio-timeline-track{position:relative;flex:1;height:14px;background:var(--hover-bg);border-radius:3px;overflow:hidden;}
+  .cio-timeline-seg{position:absolute;top:0;bottom:0;}
+  .cio-timeline-seg.grey{background:var(--sub);opacity:.35;}
+  .cio-timeline-seg.yellow{background:#d97706;}
+  .cio-timeline-seg.green{background:#16a34a;}
+  .cio-timeline-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--c-violet);}
+  .cio-timeline-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--sub);}
+  .cio-timeline-legend span{display:inline-flex;align-items:center;gap:5px;}
+  .cio-timeline-legend i{width:9px;height:9px;border-radius:2px;display:inline-block;}
 
   /* Damaged-on-return list under the condition donut — newest first, so
      whoever's checking this knows what to look into first. */
@@ -543,8 +556,21 @@
       </div>
 
       <div class="cio-mini-widget">
-        <div class="cio-section-label" style="margin-bottom:0;">Moderator activity today</div>
-        <div class="cio-mod-status-list" id="cio-mod-status-list"></div>
+        <div class="cio-timeline-head">
+          <div class="cio-section-label" style="margin-bottom:0;">Moderator activity</div>
+          <div class="cio-timeline-nav">
+            <button id="cio-day-prev" class="cio-copy-btn" type="button" title="Previous day">‹</button>
+            <span class="cio-timeline-day-label" id="cio-day-label"></span>
+            <button id="cio-day-next" class="cio-copy-btn" type="button" title="Next day">›</button>
+          </div>
+        </div>
+        <div class="cio-timeline-axis" id="cio-timeline-axis"></div>
+        <div class="cio-timeline-list" id="cio-timeline-list"></div>
+        <div class="cio-timeline-legend">
+          <span><i style="background:var(--sub);opacity:.35;"></i>No equipment out</span>
+          <span><i style="background:#d97706;"></i>Checked out</span>
+          <span><i style="background:#16a34a;"></i>Checked back in</span>
+        </div>
       </div>
 
       <div class="cio-charts">
@@ -4233,8 +4259,24 @@ function renderCheckInOutDashboard(){
   renderCioConditionChart(checkins30d);
   renderCioDamagedList(checkins30d);
   renderCioMiniList(openWithAge);
-  renderCioModStatusList();
+  renderCioModTimeline();
   renderCioSearchResult();
+}
+
+// Which day the moderator timeline below is showing — always starts on
+// today, stepped back/forward with the ‹/› buttons (never past today).
+let cioTimelineDate = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+function cioIsToday(d){
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  return d.getTime() === t.getTime();
+}
+function cioShiftTimelineDay(delta){
+  const next = new Date(cioTimelineDate);
+  next.setDate(next.getDate() + delta);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  if (next.getTime() > today.getTime()) return; // never step into the future
+  cioTimelineDate = next;
+  renderCioModTimeline();
 }
 
 // Every check-in marked Damaged in the last 30 days (respecting the Project
@@ -4262,67 +4304,80 @@ function renderCioDamagedList(checkins30d){
     </div>`).join("");
 }
 
-// One row per known moderator (added via Credentials, or anyone who's ever
-// shown up in the log), colored by today's activity:
-//   yellow — currently holding equipment (an open, not-yet-checked-in item),
-//            regardless of which day it went out
-//   green  — no open items, but logged a checkout or checkin today
-//   grey   — no activity at all today
-// Respects the Project filter: with a project selected, only that project's
-// open items/today's events count toward a mod's status.
-function renderCioModStatusList(){
-  const el = document.getElementById("cio-mod-status-list");
-  if (!el) return;
+// A per-moderator, per-day timeline: each row starts grey (day boundary at
+// midnight), turns yellow the instant that mod's checkout event lands, and
+// turns green the instant their matching checkin lands — visually replaying
+// the day's check-out/check-in activity along a 24-hour axis, rather than
+// collapsing it down to a single end-of-day status. Respects the Project
+// filter (only that project's events count) and the day picked via the
+// ‹/› buttons (cioTimelineDate, never later than today).
+function renderCioModTimeline(){
+  const listEl = document.getElementById("cio-timeline-list");
+  const axisEl = document.getElementById("cio-timeline-axis");
+  const labelEl = document.getElementById("cio-day-label");
+  const nextBtn = document.getElementById("cio-day-next");
+  if (!listEl || !axisEl || !labelEl) return;
 
-  const todayKey = new Date().toDateString();
-  const openByMod = {};
-  cioOpenCheckouts().filter(cioMatchesSelectedProject).forEach(c => {
-    (openByMod[c.modName] = openByMod[c.modName] || []).push(c);
+  const dayStart = cioTimelineDate.getTime();
+  const dayEnd = dayStart + 86400000;
+  const today = cioIsToday(cioTimelineDate);
+
+  labelEl.textContent = today ? "Today" : cioTimelineDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  if (nextBtn) nextBtn.disabled = today;
+  axisEl.innerHTML = ["12am", "6am", "12pm", "6pm", "12am"].map((t, i) => `<span style="left:calc(100px + (100% - 100px) * ${i / 4});">${t}</span>`).join("");
+
+  const nowFrac = today ? Math.min(1, (Date.now() - dayStart) / 86400000) : 1;
+
+  // All matching-project events, grouped by moderator and time-sorted —
+  // used both to simulate the state a mod was already in at this day's
+  // midnight (an item checked out on a prior day and still out) and to
+  // walk forward through this day's own events.
+  const byMod = {};
+  checkInOutLog.filter(cioMatchesSelectedProject).forEach(e => {
+    const t = parseCioTs(e.ts);
+    if (!t || !e.modName) return;
+    (byMod[e.modName] = byMod[e.modName] || []).push({ ...e, tMs: t.getTime() });
   });
-  const todayByMod = {};
-  checkInOutLog.filter(e => cioMatchesSelectedProject(e) && parseCioTs(e.ts)?.toDateString() === todayKey).forEach(e => {
-    (todayByMod[e.modName] = todayByMod[e.modName] || []).push(e);
-  });
+  Object.values(byMod).forEach(list => list.sort((a, b) => a.tMs - b.tMs));
 
   const names = new Set(checkInOutMods.map(m => m.name));
-  checkInOutLog.forEach(e => { if (e.modName) names.add(e.modName); });
+  Object.keys(byMod).forEach(n => names.add(n));
 
-  const rows = Array.from(names).filter(Boolean).map(name => {
-    const open = (openByMod[name] || []).slice().sort((a, b) => (parseCioTs(a.ts)?.getTime() || 0) - (parseCioTs(b.ts)?.getTime() || 0));
-    const today = (todayByMod[name] || []).slice().sort((a, b) => (parseCioTs(a.ts)?.getTime() || 0) - (parseCioTs(b.ts)?.getTime() || 0));
-    const status = open.length ? "yellow" : (today.length ? "green" : "grey");
-    return { name, status, open, today };
-  });
-
-  if (rows.length === 0){
-    el.innerHTML = '<div class="cio-empty">No moderators added yet.</div>';
+  if (names.size === 0){
+    listEl.innerHTML = '<div class="cio-empty">No moderators added yet.</div>';
     return;
   }
 
-  const statusOrder = { yellow: 0, green: 1, grey: 2 };
-  rows.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.name.localeCompare(b.name));
+  const rows = Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b)).map(name => {
+    const events = byMod[name] || [];
+    let openCount = 0;
+    events.forEach(e => {
+      if (e.tMs >= dayStart) return;
+      if (e.eventType === "checkout") openCount++;
+      else if (e.eventType === "checkin") openCount = Math.max(0, openCount - 1);
+    });
+    let color = openCount > 0 ? "yellow" : "grey";
+    let segStart = 0;
+    const segments = [];
+    events.filter(e => e.tMs >= dayStart && e.tMs < dayEnd).forEach(e => {
+      const frac = (e.tMs - dayStart) / 86400000;
+      if (frac > segStart) segments.push({ start: segStart, end: frac, color });
+      if (e.eventType === "checkout"){ openCount++; color = "yellow"; }
+      else if (e.eventType === "checkin"){ openCount = Math.max(0, openCount - 1); color = openCount > 0 ? "yellow" : "green"; }
+      segStart = frac;
+    });
+    if (nowFrac > segStart) segments.push({ start: segStart, end: nowFrac, color });
+    return { name, segments };
+  });
 
-  const timeFmt = (ts) => {
-    const d = parseCioTs(ts);
-    return d ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
-  };
-
-  el.innerHTML = rows.map(r => {
-    let detail;
-    if (r.status === "yellow"){
-      detail = r.open.map(c => `Out ${timeFmt(c.ts)}${c.project ? ` · ${c.project}` : ""}`).join(", ");
-    } else if (r.status === "green"){
-      detail = r.today.map(e => `${e.eventType === "checkout" ? "Out" : "In"} ${timeFmt(e.ts)}`).join(", ");
-    } else {
-      detail = "No activity today";
-    }
-    return `
-    <div class="cio-mod-status-row">
-      <span class="cio-mod-status-dot ${r.status}"></span>
-      <span class="cio-mod-status-name">${escapeHtmlCio(r.name)}</span>
-      <span class="cio-mod-status-detail">${escapeHtmlCio(detail)}</span>
-    </div>`;
-  }).join("");
+  listEl.innerHTML = rows.map(r => `
+    <div class="cio-timeline-row">
+      <span class="cio-timeline-name">${escapeHtmlCio(r.name)}</span>
+      <div class="cio-timeline-track">
+        ${r.segments.map(s => `<span class="cio-timeline-seg ${s.color}" style="left:${(s.start * 100).toFixed(3)}%;width:${((s.end - s.start) * 100).toFixed(3)}%;"></span>`).join("")}
+        ${today ? `<span class="cio-timeline-now" style="left:${(nowFrac * 100).toFixed(3)}%;"></span>` : ""}
+      </div>
+    </div>`).join("");
 }
 
 const cioProjectFilterEl = document.getElementById("cio-project-filter");
@@ -4332,6 +4387,10 @@ if (cioProjectFilterEl){
     renderCheckInOutDashboard();
   });
 }
+const cioDayPrevEl = document.getElementById("cio-day-prev");
+const cioDayNextEl = document.getElementById("cio-day-next");
+if (cioDayPrevEl) cioDayPrevEl.addEventListener("click", () => cioShiftTimelineDay(-1));
+if (cioDayNextEl) cioDayNextEl.addEventListener("click", () => cioShiftTimelineDay(1));
 
 // The one "currently checked out" list in the Check-In/Out Activity tab —
 // grouped by moderator (e.g. "Lesther (4)"), expand a name to see each
