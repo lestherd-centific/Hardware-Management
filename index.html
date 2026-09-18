@@ -850,6 +850,22 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="staleVersionBackdrop">
+  <div class="modal">
+    <h3>Update available — reload to keep saving</h3>
+    <div style="font-size:13px;color:var(--sub);line-height:1.55;">
+      This tab has been open since before a newer version of this tracker was published. It'll keep working for
+      viewing, but saving is paused here so an old copy of the page can't overwrite data with something a newer,
+      already-fixed version wouldn't have written.
+      <br><br>
+      Reload to pick up the latest version and resume saving.
+    </div>
+    <div class="modal-actions">
+      <button id="stale-version-reload" class="primary" style="width:100%;">Reload now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="locationModalBackdrop">
   <div class="modal">
     <h3>Add location</h3>
@@ -943,6 +959,18 @@ const ICON_HW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" str
 // Power Automate flow URLs — Devices, Accessories, Projects, Locations, tags,
 // and notes are all synced through these to a shared Excel workbook, so
 // everyone sees the same inventory data.
+// Bumped on every deploy. A tab's own copy of this string never changes
+// once the page has loaded — JavaScript already running in a browser tab
+// doesn't get replaced just because the file on GitHub changed underneath
+// it. checkForNewerVersion() (below) periodically re-fetches this same file
+// and compares versions, so a tab left open from before a fix shipped
+// eventually notices and blocks itself from saving until it's reloaded —
+// closing exactly the gap that let an old, unpatched tab keep silently
+// wiping Excel even after lastKnownGoodCounts/looksLikeBrokenEmptyRead were
+// added to fix that failure mode for any *newly loaded* tab.
+const APP_VERSION = "2026-09-18-2";
+let versionStale = false;
+
 const EXCEL_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
 const EXCEL_SAVE_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/8321f587f8794d59bd823e9f11d344eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=_63H721P92mYyQcIRlTTJEJaw1AeCginHq_YzqATEq0";
 // One-off flow: appends a single row to the ActivityLog table (does NOT
@@ -1817,6 +1845,16 @@ function runPush(){
 }
 
 async function doPushToExcel(){
+  // A tab that's detected it's running an outdated version (see
+  // checkForNewerVersion) refuses to save at all until it's reloaded —
+  // otherwise old, already-superseded logic could keep running in some
+  // long-open tab indefinitely and reproduce a failure mode a newer
+  // version already fixed.
+  if (versionStale){
+    setSyncStatus("This tab is running an outdated version — reload to resume saving");
+    showStaleVersionModal();
+    return;
+  }
   saveInFlight = true;
   try {
     // Conflict guard: if Excel has changed since this session last loaded
@@ -1977,6 +2015,34 @@ setInterval(autoRefreshIfSafe, 25000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") autoRefreshIfSafe();
 });
+
+// Re-fetches this same page (bypassing cache) and compares its embedded
+// APP_VERSION against this tab's own in-memory copy. A tab doesn't re-run
+// its script just because the deployed file changed, so this is the only
+// way an old, already-open tab finds out it's stale — at which point
+// doPushToExcel() (see the versionStale check there) refuses to save until
+// it's reloaded, rather than silently running outdated logic indefinitely.
+const staleVersionModal = document.getElementById("staleVersionBackdrop");
+function showStaleVersionModal(){
+  staleVersionModal.classList.add("open");
+}
+document.getElementById("stale-version-reload").onclick = () => location.reload();
+
+async function checkForNewerVersion(){
+  try {
+    const res = await fetch(location.pathname + "?_v=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const text = await res.text();
+    const m = text.match(/APP_VERSION\s*=\s*"([^"]+)"/);
+    if (m && m[1] && m[1] !== APP_VERSION){
+      versionStale = true;
+      showStaleVersionModal();
+    }
+  } catch (err){
+    console.error("Version check failed:", err);
+  }
+}
+setInterval(checkForNewerVersion, 3 * 60 * 1000);
 
 const syncConflictModal = document.getElementById("syncConflictBackdrop");
 function showSyncConflictModal(){
