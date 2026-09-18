@@ -775,6 +775,38 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="brokenLoadBackdrop">
+  <div class="modal">
+    <h3>Excel data looked incomplete</h3>
+    <div style="font-size:13px;color:var(--sub);line-height:1.55;">
+      The last read from Excel came back missing data for something that definitely had real entries a moment ago
+      (likely a temporary hiccup on Excel/Power Automate's side, not an actual deletion). To be safe, that read was
+      ignored — nothing here was changed, and nothing will be saved until this is resolved.
+      <br><br>
+      A fresh reload usually clears this up. If it keeps happening, it's worth checking the "HWTracker - Load Data"
+      flow's run history in Power Automate for errors around this time.
+    </div>
+    <div class="modal-actions">
+      <button id="broken-load-reload" class="primary" style="width:100%;">Reload now</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="brokenSaveBackdrop">
+  <div class="modal">
+    <h3>Save blocked — local data looks wrong</h3>
+    <div style="font-size:13px;color:var(--sub);line-height:1.55;">
+      This browser tab's copy of the data looks emptied out for something that should have real entries, so saving
+      right now would overwrite real data in Excel with nothing. This save was blocked instead.
+      <br><br>
+      Reload this page to get a clean copy of the real data from Excel before doing anything else.
+    </div>
+    <div class="modal-actions">
+      <button id="broken-save-reload" class="primary" style="width:100%;">Reload now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="locationModalBackdrop">
   <div class="modal">
     <h3>Add location</h3>
@@ -1594,12 +1626,60 @@ function evaluateAuthGate(){
   if (!authInfo) showAuthGate(); else hideAuthGate();
 }
 
+// Last known-good counts for the tables that get fully overwritten on save
+// (Devices/Accessories/Projects/Props). Updated only after a load or save
+// we actually trust. Used as a sanity check in both directions: a load that
+// suddenly comes back empty for a table that just had real data in it is
+// treated as a broken/incomplete read (not real ground truth), and a save
+// is refused if it would push an empty table to Excel right after we knew
+// it had real data — see doPushToExcel(). This exists because a transient
+// Excel/Power Automate hiccup once caused an empty Load response to get
+// merged in as if it were real, and that empty state was then pushed back
+// to Excel on a routine retry, wiping the live Devices/Accessories/Projects
+// tables. Locations isn't included — it's small, per-project, and a
+// legitimate "no locations yet" state is common right after adding a
+// project, so the same all-or-nothing check would be more annoying than useful there.
+let lastKnownGoodCounts = { devices: 0, accessories: 0, projects: 0, props: 0 };
+
+// True if a table that we last knew to have real rows in it just came back
+// completely empty. A one-time, brand-new-workbook "always been empty" case
+// never trips this (lastKnown starts at 0, so there's nothing to lose).
+function looksLikeBrokenEmptyRead(lastKnownCount, incomingRows){
+  return lastKnownCount > 0 && (!incomingRows || incomingRows.length === 0);
+}
+
 async function loadFromExcel(){
   setSyncStatus("Loading shared data from Excel…");
   try {
     const res = await fetch(EXCEL_LOAD_URL);
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
+
+    // Count active+archived projects the same way mergeRemoteProjects would,
+    // without actually merging yet — needed to check this table too before
+    // committing to any of the merges below.
+    const incomingProjectCount = (data.projects || []).filter(r => {
+      const name = String(r.name || "").trim();
+      return name && name !== MASTER;
+    }).length;
+
+    const brokenRead =
+      looksLikeBrokenEmptyRead(lastKnownGoodCounts.devices, data.devices) ||
+      looksLikeBrokenEmptyRead(lastKnownGoodCounts.accessories, data.accessories) ||
+      (lastKnownGoodCounts.projects > 0 && incomingProjectCount === 0) ||
+      (data.props !== undefined && looksLikeBrokenEmptyRead(lastKnownGoodCounts.props, data.props));
+
+    if (brokenRead){
+      console.error(
+        "Excel load looks broken/incomplete (a table that had real data came back empty) — " +
+        "keeping local data as-is instead of merging this in. Known-good counts:", lastKnownGoodCounts,
+        "Incoming:", { devices: (data.devices||[]).length, accessories: (data.accessories||[]).length, projects: incomingProjectCount, props: (data.props||[]).length }
+      );
+      setSyncStatus("Excel returned incomplete data — kept your local copy safe, will retry shortly");
+      showBrokenLoadModal();
+      return;
+    }
+
     lastLoadSnapshot = computeFleetFingerprint(data);
     applyCredentials(data.credentials || []);
     evaluateAuthGate();
@@ -1622,6 +1702,14 @@ async function loadFromExcel(){
     collectModelTags(data.props || [], tagsByModel);
     state.modelTags = tagsByModel;
     normalizeState();
+    // This load was trustworthy (passed the check above) — record the new
+    // known-good counts from what we just merged in.
+    lastKnownGoodCounts = {
+      devices: state.devices.length,
+      accessories: state.accessories.length,
+      projects: state.buckets.length - 1 + state.archived.length, // -1 excludes MASTER
+      props: state.props.length
+    };
     render();
     setSyncStatus("Synced with Excel");
   } catch (err){
@@ -1740,6 +1828,28 @@ async function doPushToExcel(){
       bucket: String(p.bucket || ""), location: String(p.location || "")
     }));
 
+    // Final backstop before anything gets sent: refuse to push an empty
+    // table to Excel if this same browser tab knew it had real rows a
+    // moment ago. This is what would have actually stopped the incident
+    // that motivated this check — a load-side guard exists too (see
+    // looksLikeBrokenEmptyRead / loadFromExcel), but this catches the same
+    // failure mode even if local state got corrupted some other way.
+    if (
+      looksLikeBrokenEmptyRead(lastKnownGoodCounts.devices, outgoingDevices) ||
+      looksLikeBrokenEmptyRead(lastKnownGoodCounts.accessories, outgoingAccessories) ||
+      (lastKnownGoodCounts.projects > 0 && projectsPayload.length === 0) ||
+      looksLikeBrokenEmptyRead(lastKnownGoodCounts.props, outgoingProps)
+    ){
+      console.error(
+        "Refusing to save: this would push an empty table to Excel right after knowing it had real data. " +
+        "Known-good counts:", lastKnownGoodCounts,
+        "Outgoing:", { devices: outgoingDevices.length, accessories: outgoingAccessories.length, projects: projectsPayload.length, props: outgoingProps.length }
+      );
+      setSyncStatus("Save blocked — local data looks wrong (would erase real data in Excel)");
+      showBrokenSaveModal();
+      return;
+    }
+
     try {
       const res = await fetch(EXCEL_SAVE_URL, {
         method: "POST",
@@ -1770,6 +1880,14 @@ async function doPushToExcel(){
         locations: locationsPayload
       });
       lastSaveCompletedAt = Date.now();
+      // A successful save confirms this is real, current data too — keep the
+      // known-good counts fresh so the safety checks above stay accurate.
+      lastKnownGoodCounts = {
+        devices: outgoingDevices.length,
+        accessories: outgoingAccessories.length,
+        projects: projectsPayload.length,
+        props: outgoingProps.length
+      };
       // This save just confirmed these specific ids made it to Excel — clear
       // only those from the unsaved set (not the whole thing), since a
       // different edit could have happened after this payload was already
@@ -1826,6 +1944,18 @@ document.getElementById("sync-conflict-reload").onclick = () => {
   conflictBlocked = false;
   loadFromExcel();
 };
+
+const brokenLoadModal = document.getElementById("brokenLoadBackdrop");
+function showBrokenLoadModal(){
+  brokenLoadModal.classList.add("open");
+}
+document.getElementById("broken-load-reload").onclick = () => location.reload();
+
+const brokenSaveModal = document.getElementById("brokenSaveBackdrop");
+function showBrokenSaveModal(){
+  brokenSaveModal.classList.add("open");
+}
+document.getElementById("broken-save-reload").onclick = () => location.reload();
 
 function statusLabel(s){ return s === "instock" ? "In stock" : s === "inuse" ? "In use" : "Broken"; }
 
