@@ -315,6 +315,8 @@
   .dd-meta{font-size:13px;color:var(--sub);line-height:1.8;margin:6px 0 16px;padding:10px 12px;background:var(--bg);border-radius:8px;}
   .dd-meta b{color:var(--ink);}
   .dd-status-chip{font-size:11px;padding:2px 8px;border-radius:6px;font-weight:600;}
+  .dd-kit-row{margin-top:2px;}
+  .dd-kit-wrap{position:relative;display:inline-block;}
   .dd-meta .dd-kit-input{width:auto;min-width:160px;display:inline-block;padding:3px 8px;font-size:12.5px;margin-left:2px;vertical-align:middle;}
   .dd-section-label{font-size:11px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;margin:0 0 6px;}
   .dd-list{max-height:170px;overflow-y:auto;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;padding:2px 12px;}
@@ -456,7 +458,7 @@
     <div id="authStatus" class="sync-status"></div>
   </div>
   <div class="toolbar">
-    <input type="text" id="search" placeholder="Search asset tag, model, serial, or tag (e.g. Tablet)...">
+    <input type="text" id="search" placeholder="Search asset tag, model, serial, kit, or tag (e.g. Sesame Kit 2)...">
     <button id="addProjectBtn">+ Project</button>
     <button id="addAssetBtn" class="primary">+ Asset</button>
     <button id="exportBtn">Export JSON</button>
@@ -938,6 +940,12 @@
       <button id="dd-close" class="dd-close-x" title="Close">✕</button>
     </div>
     <div id="dd-meta" class="dd-meta"></div>
+    <div class="dd-meta dd-kit-row">
+      Kit: <span class="dd-kit-wrap">
+        <input type="text" id="dd-kit-input" class="dd-kit-input" placeholder="Not part of a kit" autocomplete="off" title="Optional — group devices that are always used/checked out together, e.g. camera + mic + mmchip as 'Kit 1'. Search the kit name up top to see everything in it.">
+        <div class="suggest-dropdown" id="dd-kit-suggest"></div>
+      </span>
+    </div>
 
     <div class="dd-section-label">History</div>
     <div id="dd-history" class="dd-list"></div>
@@ -1249,6 +1257,20 @@ function normalizeState(){
   if (!state.locations) state.locations = {};
   state.buckets.forEach(b => {
     if (!state.locations[b]) state.locations[b] = [];
+  });
+  // Drop location keys that belong to no live or archived project. Nothing
+  // else prunes them, and locationsPayload writes EVERY key in this object
+  // straight into the Locations table, so an orphan is permanent once it
+  // exists. Renaming a project created one in every OTHER admin's tab:
+  // renameBucket deletes state.locations[oldName] only in the tab that did
+  // the rename, and mergeRemoteLocations only overwrites keys for current
+  // buckets — it never removes one. So a second tab kept the old key and
+  // re-pushed the renamed project's old rows on its next save, which is why
+  // the Locations table regained a name every other table had let go of.
+  // Archived projects keep their locations, hence the archived names here.
+  const knownLocationBuckets = new Set([...state.buckets, ...state.archived.map(a => a.name)]);
+  Object.keys(state.locations).forEach(b => {
+    if (!knownLocationBuckets.has(b)) delete state.locations[b];
   });
   state.devices.forEach(d => {
     if (!d.notes) d.notes = [];
@@ -2102,7 +2124,9 @@ function statusLabel(s){ return s === "instock" ? "In stock" : s === "inuse" ? "
 function matchesQuery(d, q){
   if (!q) return true;
   const tags = (state.modelTags[d.model] || []).join(" ");
-  return [d.tag, d.model, d.serial, tags].join(" ").toLowerCase().includes(q);
+  // d.kit is in here so searching a kit name ("Sesame Kit 2") pulls up every
+  // device in that kit, wherever each one currently sits.
+  return [d.tag, d.model, d.serial, d.kit, tags].join(" ").toLowerCase().includes(q);
 }
 
 function matchesPropQuery(p, q){
@@ -2113,6 +2137,14 @@ function matchesPropQuery(p, q){
 
 // Distinct model names already in use, for the Model-field autocomplete
 // dropdowns on the Add Device / Add Accessory modals.
+// Every kit name currently in use, for the device detail's Kit autocomplete.
+// Kit names are free text, so without this "Sesame Kit 2" and "sesame kit 2"
+// quietly become two different kits that each show half the devices.
+function existingKits(){
+  return [...new Set(state.devices.map(d => (d.kit || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }));
+}
+
 function existingHardwareModels(){
   return [...new Set(state.devices.map(d => d.model).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
@@ -3165,9 +3197,10 @@ function openDeviceDetail(id){
   document.getElementById("dd-meta").innerHTML = `
     Serial: <b>${d.serial}</b><br>
     Status: <span class="dd-status-chip status-select ${d.status}">${statusLabel(d.status)}</span><br>
-    Currently in: <b>${d.bucket}</b><br>
-    Kit: <input type="text" id="dd-kit-input" class="dd-kit-input" placeholder="Not part of a kit" value="${d.kit || ""}" title="Optional — group devices that are always used/checked out together, e.g. camera + mic + mmchip as 'Kit 1'.">
+    Currently in: <b>${d.bucket}</b>
   `;
+  document.getElementById("dd-kit-input").value = d.kit || "";
+  document.getElementById("dd-kit-suggest").classList.remove("open");
   // Kit and any note text are committed together via the Save button below
   // (not saved as-you-type/on-blur) so there's a single, unmistakable
   // confirmation moment instead of a silent auto-save.
@@ -3880,6 +3913,12 @@ document.getElementById("archive-confirm-ok").onclick = () => {
 };
 
 // Device detail modal (history + notes)
+setupModelAutocomplete(
+  document.getElementById("dd-kit-input"),
+  document.getElementById("dd-kit-suggest"),
+  existingKits
+);
+
 const deviceDetailModal = document.getElementById("deviceDetailBackdrop");
 document.getElementById("dd-close").onclick = () => deviceDetailModal.classList.remove("open");
 // Single Save action for the device detail popup — commits both the Kit
