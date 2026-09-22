@@ -3595,6 +3595,12 @@ function renameBucket(oldName, newName){
   if (state.featured === oldName) state.featured = newName;
   state.devices.forEach(d => { if (d.bucket === oldName) d.bucket = newName; });
   state.accessories.forEach(a => { if (a.bucket === oldName) a.bucket = newName; });
+  // Props must be renamed here too. Leaving them on the old name meant the
+  // old name got written back to the Props table, and the next Load's
+  // mergeRemoteProps -> ensureBucketExists() re-created it as a live project
+  // (it's neither in buckets nor archived), so the renamed project came back
+  // as a ghost duplicate holding the orphaned props.
+  state.props.forEach(p => { if (p.bucket === oldName) p.bucket = newName; });
   logActivity({ ts: new Date().toLocaleString(), type: "rename", tag: newName, from: oldName, to: newName });
 }
 
@@ -3632,6 +3638,12 @@ function renameArchivedProject(oldName, newName){
     state.locations[newName] = state.locations[oldName];
     delete state.locations[oldName];
   }
+  // The archived record now carries the new name, so the old name is no
+  // longer recognised as archived — any item still pointing at it would be
+  // resurrected as a live project by ensureBucketExists() on the next Load.
+  state.devices.forEach(d => { if (d.bucket === oldName) d.bucket = newName; });
+  state.accessories.forEach(a => { if (a.bucket === oldName) a.bucket = newName; });
+  state.props.forEach(p => { if (p.bucket === oldName) p.bucket = newName; });
   logActivity({ ts: new Date().toLocaleString(), type: "rename", tag: newName, from: oldName, to: newName });
 }
 
