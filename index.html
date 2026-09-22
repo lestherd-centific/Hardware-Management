@@ -89,7 +89,7 @@
   .cio-row .cio-right{text-align:right;color:var(--sub);font-size:12.5px;white-space:nowrap;}
   .cio-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--st-broken-bg);color:var(--st-broken);white-space:nowrap;}
   .cio-empty{padding:10px 0;color:var(--sub);font-size:12.5px;}
-  .cio-charts{display:grid;grid-template-columns:1.3fr 1fr;gap:24px;}
+  .cio-charts{display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:start;}
   .cio-chart-legend{display:flex;gap:16px;font-size:12px;color:var(--sub);margin-bottom:6px;flex-wrap:wrap;}
   .cio-chart-legend span{display:inline-flex;align-items:center;gap:5px;}
   .cio-chart-legend i{width:10px;height:10px;border-radius:2px;display:inline-block;}
@@ -202,11 +202,21 @@
   .cio-timeline-day-label{font-size:12.5px;font-weight:600;min-width:64px;text-align:center;}
   .cio-timeline-nav button{padding:3px 10px;font-size:13px;line-height:1.4;}
   .cio-timeline-nav button:disabled{opacity:.35;cursor:default;}
-  .cio-timeline-axis{position:relative;height:14px;margin:10px 0 2px;padding-left:100px;font-size:10px;color:var(--sub);}
+  .cio-timeline-axis{position:relative;height:14px;margin:10px 0 2px;padding-left:100px;padding-right:8px;font-size:10px;color:var(--sub);}
   .cio-timeline-axis span{position:absolute;transform:translateX(-50%);}
   .cio-timeline-axis span:first-child{transform:translateX(0);}
   .cio-timeline-axis span:last-child{transform:translateX(-100%);}
-  .cio-timeline-list{max-height:300px;overflow-y:visible;}
+  /* One row = 9px top pad + 18px track + 9px bottom pad = 36px. Ten of those
+     is the visible window; everything past the 10th mod scrolls. This MUST
+     stay overflow-y:auto — it was overflow-y:visible with a max-height, which
+     doesn't clip or scroll, so a long mod list rendered straight over the
+     legend and the Condition-on-return section underneath it. */
+  .cio-timeline-list{--cio-tl-row:36px;max-height:calc(var(--cio-tl-row) * 10);overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;}
+  /* Fixed 8px scrollbar so the axis above can reserve exactly the same gutter
+     and its hour labels stay lined up with the dots below them. */
+  .cio-timeline-list::-webkit-scrollbar{width:8px;}
+  .cio-timeline-list::-webkit-scrollbar-thumb{background:var(--sub);opacity:.4;border-radius:4px;}
+  .cio-timeline-list::-webkit-scrollbar-track{background:transparent;}
   .cio-timeline-row{display:flex;align-items:center;gap:10px;padding:9px 0;}
   .cio-timeline-name{width:100px;flex:0 0 100px;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cio-timeline-offhours{font-size:10px;cursor:help;margin-left:2px;}
@@ -215,9 +225,12 @@
   .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;}
   .cio-timeline-dot.yellow{background:#d97706;}
   .cio-timeline-dot.green{background:#16a34a;}
-  .cio-timeline-dot::after{content:attr(data-tip);position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--panel);font-size:10.5px;font-weight:600;padding:4px 8px;border-radius:5px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .1s;z-index:5;}
   .cio-timeline-dot:hover{z-index:6;}
-  .cio-timeline-dot:hover::after{opacity:1;}
+  /* Lives on <body>, not inside .cio-timeline-list — a scroll container clips
+     its own overflow, which would have hidden a tooltip on whichever row is
+     currently at the top of the visible window. Positioned by cioShowDotTip(). */
+  .cio-tl-tip{position:fixed;background:var(--ink);color:var(--panel);font-size:10.5px;font-weight:600;padding:4px 8px;border-radius:5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;transform:translate(-50%,-100%);}
+  .cio-tl-tip.show{opacity:1;}
   .cio-timeline-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--c-violet);}
   .cio-timeline-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--sub);}
   .cio-timeline-legend span{display:inline-flex;align-items:center;gap:5px;}
@@ -226,7 +239,9 @@
 
   /* Damaged-on-return list under the condition donut — newest first, so
      whoever's checking this knows what to look into first. */
-  .cio-damaged-list{margin-top:12px;max-height:220px;overflow-y:auto;}
+  /* One row = 8+8 pad + a ~17px title line + a ~15px meta line + 1px rule.
+     Ten rows visible, everything older scrolls. */
+  .cio-damaged-list{--cio-dmg-row:45px;max-height:calc(var(--cio-dmg-row) * 10);overflow-y:auto;padding-right:4px;}
   .cio-damaged-row{padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
   .cio-damaged-row:last-child{border-bottom:none;}
   .cio-damaged-row .top{display:flex;justify-content:space-between;gap:8px;font-weight:600;color:var(--st-broken);}
@@ -588,12 +603,15 @@
 
       <div class="cio-charts">
         <div>
+          <div class="cio-section-label">Reported damaged on return, last 30 days</div>
+          <div class="cio-damaged-list" id="cio-damaged-list"></div>
+        </div>
+        <div>
           <div class="cio-section-label">Condition on return, last 30 days</div>
           <div style="position:relative;width:100%;height:180px;">
             <canvas id="cioCondChart" role="img" aria-label="Donut chart of returned-item condition over the last 30 days"></canvas>
           </div>
           <div class="cio-chart-legend" id="cio-cond-legend" style="margin-top:8px;"></div>
-          <div class="cio-damaged-list" id="cio-damaged-list"></div>
         </div>
       </div>
     </div>
@@ -4380,7 +4398,7 @@ function renderCioDamagedList(checkins30d){
     .slice()
     .sort((a, b) => (parseCioTs(b.ts)?.getTime() || 0) - (parseCioTs(a.ts)?.getTime() || 0));
   if (damaged.length === 0){
-    el.innerHTML = "";
+    el.innerHTML = '<div class="cio-empty">No damaged returns in the last 30 days.</div>';
     return;
   }
   el.innerHTML = damaged.map(e => `
@@ -4666,6 +4684,43 @@ function renderCioConditionChart(checkins30d){
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
   });
 }
+
+// Timeline dot tooltips. These used to be a pure-CSS ::after on the dot, but
+// .cio-timeline-list is now a scroll container (10 mods visible, rest scrolls)
+// and a scroll container clips anything its children draw outside it — which
+// killed the tooltip on whichever row sat at the top of the visible window.
+// One reused fixed-position element on <body> can't be clipped by anything.
+const cioTlTip = document.createElement("div");
+cioTlTip.className = "cio-tl-tip";
+document.body.appendChild(cioTlTip);
+
+function cioShowDotTip(dot){
+  const tip = dot.getAttribute("data-tip");
+  if (!tip) return;
+  cioTlTip.textContent = tip;
+  const r = dot.getBoundingClientRect();
+  cioTlTip.style.left = (r.left + r.width / 2) + "px";
+  cioTlTip.style.top = (r.top - 6) + "px";
+  cioTlTip.classList.add("show");
+}
+
+function cioHideDotTip(){ cioTlTip.classList.remove("show"); }
+
+(function wireCioDotTips(){
+  const list = document.getElementById("cio-timeline-list");
+  if (!list) return;
+  // Delegated, so it survives every re-render of the timeline rows.
+  list.addEventListener("mouseover", e => {
+    const dot = e.target.closest && e.target.closest(".cio-timeline-dot");
+    if (dot) cioShowDotTip(dot);
+  });
+  list.addEventListener("mouseout", e => {
+    if (e.target.closest && e.target.closest(".cio-timeline-dot")) cioHideDotTip();
+  });
+  // A tooltip pinned to old screen coords while the list scrolls under it
+  // would just be wrong, so drop it instead of trying to follow.
+  list.addEventListener("scroll", cioHideDotTip);
+})();
 
 render(); // render immediately from local cache so the page isn't blank while Excel loads
 loadFromExcel();
