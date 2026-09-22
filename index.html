@@ -4367,9 +4367,14 @@ function cioMatchesSelectedProject(row){
 function populateCioProjectFilter(){
   const sel = document.getElementById("cio-project-filter");
   if (!sel) return;
+  // Live projects only. This deliberately does NOT harvest project names out
+  // of checkInOutLog: a checkout row keeps whatever the project was called at
+  // the time, and that workbook belongs to the Check-In/Out site (this app
+  // only ever reads it), so renamed and deleted projects lingered here
+  // forever with no way to clear them. Their rows are still visible under
+  // "All projects" — they just no longer get their own filter entry.
   const names = new Set();
   (state.buckets || []).forEach(b => { if (b !== MASTER) names.add(b); });
-  checkInOutLog.forEach(e => { if (e.project) names.add(e.project); });
   const sorted = Array.from(names).sort((a, b) => a.localeCompare(b));
   const prev = sel.value;
   sel.innerHTML = '<option value="">All projects</option>' +
