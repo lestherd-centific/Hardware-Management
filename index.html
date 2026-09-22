@@ -4493,7 +4493,7 @@ function renderCioModTimeline(){
     events.filter(e => e.tMs >= dayStart && e.tMs < dayEnd).forEach(e => {
       const rawFrac = (e.tMs - dayStart) / 86400000;
       const axisFrac = (rawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
-      const label = `${e.eventType === "checkout" ? "Checked out" : "Checked back in"} ${timeFmt(e.ts)}${e.model ? " · " + e.model : ""}`;
+      const label = `${e.eventType === "checkout" ? "Checked out" : "Checked back in"} ${timeFmt(e.ts)}`;
       if (axisFrac < 0 || axisFrac > 1){ hasOffWindow = true; return; }
       dots.push({ frac: axisFrac, color: e.eventType === "checkout" ? "yellow" : "green", label });
     });
