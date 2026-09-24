@@ -4300,7 +4300,12 @@ async function loadCheckInOutData(){
       ts: String(r.ts || ""), modName: String(r.modName || ""), deviceId: String(r.deviceId || ""),
       tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
       project: String(r.project || ""), location: String(r.location || ""),
-      condition: String(r.condition || ""), notes: String(r.notes || "")
+      condition: String(r.condition || ""), notes: String(r.notes || ""),
+      // Moderators often work in pairs. The Check-In/Out site asks who you're
+      // paired with at sign-in and puts that name here; blank means alone.
+      // Both names live on ONE row — the event is not written twice — so
+      // checkoutId pairing is untouched.
+      partner: String(r.partner || "")
     })).filter(r => r.id);
     checkInOutMods = (data.credentials || []).map(r => ({
       name: String(r.name || ""), login: String(r.login || ""), role: String(r.role || "")
@@ -4348,6 +4353,15 @@ function groupOpenByMod(openWithAge){
     return { modName, items: sorted, count: sorted.length, overdue: sorted.some(i => i.overdue), maxMs: sorted[0].ms };
   }).sort((a, b) => (b.overdue - a.overdue) || (b.maxMs - a.maxMs));
 }
+// "Lesther Dumosmog and Arman Taherazer" when a row carries a partner, just
+// the one name when it doesn't — so rows written before the partner column
+// existed read exactly as they always have.
+function cioPairNames(e){
+  const mod = String(e.modName || "").trim() || "(unknown)";
+  const partner = String(e.partner || "").trim();
+  return partner && partner !== mod ? `${mod} and ${partner}` : mod;
+}
+
 function cioAgeLabel(ms){
   const hours = ms / 3600000;
   return hours < 24 ? `${Math.round(hours)}h` : `${Math.round(hours / 24)}d`;
@@ -4400,7 +4414,19 @@ function renderCheckInOutDashboard(){
   const checkins30d = checkInOutLog.filter(e => cioMatchesSelectedProject(e) && e.eventType === "checkin" && (parseCioTs(e.ts)?.getTime() || 0) >= thirtyDaysAgo);
   const damaged30d = checkins30d.filter(e => e.condition === "Damaged").length;
   const sevenDaysAgo = now - 7 * 24 * 60 * 60 * 1000;
-  const activeMods7d = new Set(checkInOutLog.filter(e => cioMatchesSelectedProject(e) && (parseCioTs(e.ts)?.getTime() || 0) >= sevenDaysAgo).map(e => e.modName)).size;
+  // Distinct modName UNION partner — a mod who only ever works as the second
+  // name would otherwise never count as active. Blank names are skipped so an
+  // empty modName can't register as a phantom active mod.
+  const activeModNames = new Set();
+  checkInOutLog
+    .filter(e => cioMatchesSelectedProject(e) && (parseCioTs(e.ts)?.getTime() || 0) >= sevenDaysAgo)
+    .forEach(e => {
+      const mod = String(e.modName || "").trim();
+      const partner = String(e.partner || "").trim();
+      if (mod) activeModNames.add(mod);
+      if (partner) activeModNames.add(partner);
+    });
+  const activeMods7d = activeModNames.size;
 
   document.getElementById("cio-kpis").innerHTML = `
     <div class="cio-kpi"><div class="cio-label">Currently checked out</div><div class="cio-value">${openWithAge.length}</div></div>
@@ -4463,7 +4489,7 @@ function renderCioDamagedList(checkins30d){
         <span>${escapeHtmlCio(e.model)}${e.serial ? ` · S/N ${escapeHtmlCio(e.serial)}` : ""}</span>
         <span>${escapeHtmlCio(e.ts)}</span>
       </div>
-      <div class="meta">Handled by ${escapeHtmlCio(e.modName || "(unknown)")}${e.tag ? ` · ${escapeHtmlCio(e.tag)}` : ""}${e.project ? ` · ${escapeHtmlCio(e.project)}` : ""}</div>
+      <div class="meta">Handled by ${escapeHtmlCio(cioPairNames(e))}${e.tag ? ` · ${escapeHtmlCio(e.tag)}` : ""}${e.project ? ` · ${escapeHtmlCio(e.project)}` : ""}</div>
     </div>`).join("");
 }
 
@@ -4510,8 +4536,19 @@ function renderCioModTimeline(){
   const byMod = {};
   checkInOutLog.filter(cioMatchesSelectedProject).forEach(e => {
     const t = parseCioTs(e.ts);
-    if (!t || !e.modName) return;
-    (byMod[e.modName] = byMod[e.modName] || []).push({ ...e, tMs: t.getTime() });
+    if (!t) return;
+    const partner = String(e.partner || "").trim();
+    // withName is whoever the OTHER person on this event is, from the
+    // perspective of the row it's being placed on — that's what the dot's
+    // tooltip names.
+    if (e.modName) (byMod[e.modName] = byMod[e.modName] || []).push({ ...e, tMs: t.getTime(), withName: partner });
+    // The pair share a single log row, so without mirroring it here the
+    // second name has an empty track all day and reads as "did nothing".
+    // This also feeds openCountAtDayStart below, so a partner still holding
+    // equipment from a previous day correctly shows as still out.
+    if (partner && partner !== e.modName){
+      (byMod[partner] = byMod[partner] || []).push({ ...e, tMs: t.getTime(), withName: String(e.modName || "").trim() });
+    }
   });
   Object.values(byMod).forEach(list => list.sort((a, b) => a.tMs - b.tMs));
 
@@ -4532,9 +4569,10 @@ function renderCioModTimeline(){
     const events = byMod[name] || [];
     let openCountAtDayStart = 0;
     let lastOpenTs = null;
+    let lastOpenWith = "";
     events.forEach(e => {
       if (e.tMs >= dayStart) return;
-      if (e.eventType === "checkout"){ openCountAtDayStart++; lastOpenTs = e.ts; }
+      if (e.eventType === "checkout"){ openCountAtDayStart++; lastOpenTs = e.ts; lastOpenWith = e.withName || ""; }
       else if (e.eventType === "checkin") openCountAtDayStart = Math.max(0, openCountAtDayStart - 1);
     });
 
@@ -4544,12 +4582,12 @@ function renderCioModTimeline(){
       // Already holding equipment as of midnight — pin a marker at the
       // very start of the visible axis instead of dropping it, since no
       // NEW event happens today to place a dot at.
-      dots.push({ frac: 0, color: "yellow", label: `Still out — checked out ${lastOpenTs ? timeFmt(lastOpenTs) : "earlier"}` });
+      dots.push({ frac: 0, color: "yellow", label: `Still out — checked out ${lastOpenTs ? timeFmt(lastOpenTs) : "earlier"}${lastOpenWith ? ` (with ${lastOpenWith})` : ""}` });
     }
     events.filter(e => e.tMs >= dayStart && e.tMs < dayEnd).forEach(e => {
       const rawFrac = (e.tMs - dayStart) / 86400000;
       const axisFrac = (rawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
-      const label = `${e.eventType === "checkout" ? "Checked out" : "Checked back in"} ${timeFmt(e.ts)}`;
+      const label = `${e.eventType === "checkout" ? "Checked out" : "Checked back in"} ${timeFmt(e.ts)}${e.withName ? ` (with ${e.withName})` : ""}`;
       if (axisFrac < 0 || axisFrac > 1){ hasOffWindow = true; return; }
       dots.push({ frac: axisFrac, color: e.eventType === "checkout" ? "yellow" : "green", label });
     });
@@ -4603,7 +4641,7 @@ function renderCioMiniList(openWithAge){
       const ageLabel = cioAgeLabel(c.ms);
       return `
       <div class="cio-mini-subrow">
-        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span></span>
+        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}${String(c.partner || "").trim() ? ` · with ${escapeHtmlCio(String(c.partner).trim())}` : ""}</span></span>
         <span>${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</span>
         <span class="${c.overdue ? "overdue" : ""}">${ageLabel}${c.overdue ? " · overdue" : ""}</span>
       </div>`;
@@ -4662,14 +4700,14 @@ function renderCioSearchResult(){
   if (result.status === "out"){
     el.innerHTML = `
     <div class="found-out">
-      <div class="who">${escapeHtmlCio(e.model)} · ${escapeHtmlCio(e.tag)}${e.serial ? ` (S/N ${escapeHtmlCio(e.serial)})` : ""} is currently checked out by ${escapeHtmlCio(e.modName)}</div>
+      <div class="who">${escapeHtmlCio(e.model)} · ${escapeHtmlCio(e.tag)}${e.serial ? ` (S/N ${escapeHtmlCio(e.serial)})` : ""} is currently checked out by ${escapeHtmlCio(cioPairNames(e))}</div>
       <div>${escapeHtmlCio(e.project)} / ${escapeHtmlCio(e.location)} · out ${result.ageLabel}${result.overdue ? ` <span class="overdue-tag">· overdue</span>` : ""}</div>
     </div>`;
   } else {
     el.innerHTML = `
     <div class="found-in">
       ${escapeHtmlCio(e.model)} · ${escapeHtmlCio(e.tag)}${e.serial ? ` (S/N ${escapeHtmlCio(e.serial)})` : ""} is <b>not</b> currently checked out.
-      Last returned by <b>${escapeHtmlCio(e.modName)}</b> on ${escapeHtmlCio(e.ts)}${e.condition ? `, condition: ${escapeHtmlCio(e.condition)}` : ""}.
+      Last returned by <b>${escapeHtmlCio(cioPairNames(e))}</b> on ${escapeHtmlCio(e.ts)}${e.condition ? `, condition: ${escapeHtmlCio(e.condition)}` : ""}.
     </div>`;
   }
 }
