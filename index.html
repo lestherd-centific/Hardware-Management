@@ -241,11 +241,23 @@
      whoever's checking this knows what to look into first. */
   /* One row = 8+8 pad + a ~17px title line + a ~15px meta line + 1px rule.
      Ten rows visible, everything older scrolls. */
-  .cio-damaged-list{--cio-dmg-row:45px;max-height:calc(var(--cio-dmg-row) * 10);overflow-y:auto;padding-right:4px;}
-  .cio-damaged-row{padding:8px 0;border-bottom:1px solid var(--border);font-size:12.5px;}
-  .cio-damaged-row:last-child{border-bottom:none;}
-  .cio-damaged-row .top{display:flex;justify-content:space-between;gap:8px;font-weight:600;color:var(--st-broken);}
-  .cio-damaged-row .meta{color:var(--sub);font-size:11.5px;margin-top:2px;}
+  /* Device issue reports. Replaces the old "Reported damaged" list, which
+     showed the same events from the other direction — what happened, rather
+     than what's still unresolved. */
+  .cio-issues-list{max-height:520px;overflow-y:auto;padding-right:4px;}
+  .cio-issues-group{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:14px 0 7px;}
+  .cio-issues-group:first-child{margin-top:0;}
+  .cio-issue-card{border:1px solid var(--border);border-left:3px solid var(--sub);border-radius:8px;padding:10px 12px;margin-bottom:8px;}
+  .cio-issue-card.is-open{border-left-color:var(--st-broken);}
+  .cio-issue-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .cio-issue-title{font-size:12.5px;font-weight:700;}
+  .cio-issue-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--hover-bg);color:var(--sub);}
+  .cio-issue-badge.is-open{background:rgba(220,38,38,.12);color:var(--st-broken);}
+  .cio-issue-meta{font-size:11.5px;color:var(--sub);margin-top:2px;}
+  .cio-issue-desc{font-size:12.5px;margin-top:7px;}
+  .cio-issue-res{margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--hover-bg);}
+  .cio-issue-res .lbl{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin-bottom:3px;}
+  .cio-issue-res .txt{font-size:12px;}
   .model-table{width:100%;border-collapse:collapse;font-size:13px;}
   .model-table th{text-align:left;font-size:11px;font-weight:600;color:var(--sub);text-transform:uppercase;letter-spacing:.03em;padding:6px 10px;border-bottom:1px solid var(--border);}
   .model-table th.num,.model-table td.num{text-align:right;}
@@ -605,8 +617,8 @@
 
       <div class="cio-charts">
         <div>
-          <div class="cio-section-label">Reported damaged on return, last 30 days</div>
-          <div class="cio-damaged-list" id="cio-damaged-list"></div>
+          <div class="cio-section-label">Device issues</div>
+          <div class="cio-issues-list" id="cio-issues-list"></div>
         </div>
         <div>
           <div class="cio-section-label">Condition on return, last 30 days</div>
@@ -1025,6 +1037,17 @@ const EXCEL_LOG_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environm
 // Same "CheckInOut - Load Data" flow the check-in/out site itself uses.
 const CHECKINOUT_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/4838ed8350324c4ca02fb04ec2d9ef23/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=jDGVC0LF1iAcwrt1jyHjnrmytF1MI82ddmxTeUEmE5Y";
 const CHECKINOUT_OVERDUE_HOURS = 48;
+
+// The moderators' device-issue log — a THIRD workbook, separate again from
+// both this tracker's and the Check-In/Out site's. Read-only, same shape as
+// CHECKINOUT_LOAD_URL: POST, no body, returns { "issues": [ ... ] }. A device
+// with an Open or In Review report is withheld from check-out on that site.
+// Until this is filled in the issues panel simply says it isn't configured;
+// nothing else on the tab is affected.
+const CHECKINOUT_ISSUES_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/21/workflows/fa2ead94bdb44ea9853d423c18bf3966/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=oaoPbIDKqioi9Z1YaNUi3QnHIUwwLuamrTUOoxSUsrE";
+// Statuses that mean the device is out of service. The other two the sheet
+// uses — Resolved and Replaced — mean it's back in circulation.
+const CIO_ISSUE_OPEN_STATUSES = ["open", "in review"];
 
 // Seed data pulled from the "Device Returns" tab of Inventory Tracker(1).xlsx.
 // Original per-site location is ignored — everything below has been returned
@@ -4284,6 +4307,8 @@ let checkInOutLog = [];
 // activity list below can show someone with zero history as "no activity"
 // instead of just omitting them — that absence is the whole point of the list.
 let checkInOutMods = [];
+let checkInOutIssues = [];
+let cioIssuesConfigured = CHECKINOUT_ISSUES_LOAD_URL.indexOf("PASTE_") !== 0;
 // "" = all projects. Set by the Project filter dropdown; narrows the KPIs,
 // currently-checked-out list, condition chart, and moderator status list.
 let cioSelectedProject = "";
@@ -4428,15 +4453,27 @@ function renderCheckInOutDashboard(){
     });
   const activeMods7d = activeModNames.size;
 
+  // Distinct physical items with an unresolved report (Open or In Review).
+  // Counted per item, not per report, so two reports on one camera is one
+  // device out of service. Untracked gear — radar cages, hubs, power banks,
+  // anything with a blank Device Ref — counts too: it's still kit that can't
+  // go out. Uses the issue log's own Project value, so it follows the filter.
+  const outOfServiceKeys = new Set();
+  checkInOutIssues
+    .filter(i => cioMatchesSelectedProject(i) && cioIssueIsOpen(i))
+    .forEach(i => { const k = cioIssueDeviceKey(i); if (k) outOfServiceKeys.add(k); });
+  const outOfService = outOfServiceKeys.size;
+
   document.getElementById("cio-kpis").innerHTML = `
     <div class="cio-kpi"><div class="cio-label">Currently checked out</div><div class="cio-value">${openWithAge.length}</div></div>
     <div class="cio-kpi"><div class="cio-label">Overdue (${CHECKINOUT_OVERDUE_HOURS}h+)</div><div class="cio-value ${overdueCount ? "danger" : ""}">${overdueCount}</div></div>
+    <div class="cio-kpi"><div class="cio-label">Out of service</div><div class="cio-value ${outOfService ? "danger" : ""}">${outOfService}</div></div>
     <div class="cio-kpi"><div class="cio-label">Returned damaged, 30d</div><div class="cio-value">${damaged30d}</div></div>
     <div class="cio-kpi"><div class="cio-label">Active mods, 7d</div><div class="cio-value">${activeMods7d}</div></div>
   `;
 
   renderCioConditionChart(checkins30d);
-  renderCioDamagedList(checkins30d);
+  renderCioIssuesPanel();
   renderCioMiniList(openWithAge);
   renderCioModTimeline();
   renderCioSearchResult();
@@ -4468,29 +4505,125 @@ function cioFormatHourLabel(hour){
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-// Every check-in marked Damaged in the last 30 days (respecting the Project
-// filter), newest first — device, serial, who handled it, and when — so a
-// damaged-condition percentage on the donut can be traced back to specifics
-// without digging through the raw log.
-function renderCioDamagedList(checkins30d){
-  const el = document.getElementById("cio-damaged-list");
+// Pulls the device-issue log. Its own fetch and its own try/catch so a
+// failure here can't take the rest of the Check-In/Out tab down with it —
+// the same isolation rule this tab already follows for the checkout log.
+async function loadCheckInOutIssues(){
+  if (!cioIssuesConfigured) return;
+  try {
+    const res = await fetch(CHECKINOUT_ISSUES_LOAD_URL, { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    // Excel hands back the column headers verbatim as keys, spaces and all,
+    // so these strings must match the sheet exactly. @odata.etag and
+    // ItemInternalId ride along and are ignored.
+    checkInOutIssues = (data.issues || []).map(r => ({
+      id: String(r["Report ID"] || ""),
+      ts: String(r["Date/Time Reported"] || ""),
+      reportedBy: String(r["Reported By"] || ""),
+      project: String(r["Project"] || ""),
+      location: String(r["Location"] || ""),
+      serial: String(r["Device SN"] || ""),
+      tag: String(r["Asset Tag"] || ""),
+      deviceType: String(r["Device Type"] || ""),
+      description: String(r["Description of Issue"] || ""),
+      context: String(r["Session/Context"] || ""),
+      status: String(r["Status"] || ""),
+      resolution: String(r["Resolution Notes"] || ""),
+      // This tracker's own device id, so an issue joins straight onto
+      // state.devices. Blank for gear the tracker doesn't hold — radar
+      // cages, hubs, power banks — which still get a card in the panel.
+      deviceRef: String(r["Device Ref"] || ""),
+      partner: String(r["Partner"] || "")
+    })).filter(r => r.id || r.serial || r.tag);
+    renderCheckInOutDashboard();
+  } catch (err){
+    console.error("Device issue log load failed:", err);
+  }
+}
+
+function cioIssueIsOpen(i){
+  return CIO_ISSUE_OPEN_STATUSES.includes(String(i.status || "").trim().toLowerCase());
+}
+
+// "9/24/2026, 8:54:20 AM PDT" — the zone is spelled out, so this resolves to
+// the right instant whatever timezone the viewer is in. Only ever compared
+// against other issue rows: the checkout log's ts is each browser's own local
+// clock with no zone at all, so the two are NOT interchangeable.
+function parseCioIssueTs(ts){
+  const d = new Date(ts);
+  return isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
+// One key per physical item, so two reports against the same device count
+// once. Device Ref when the tracker knows the device, otherwise serial or
+// asset tag — untracked gear is still kit that can't go out.
+function cioIssueDeviceKey(i){
+  const ref = String(i.deviceRef || "").trim();
+  if (ref) return "ref:" + ref.toLowerCase();
+  const sn = String(i.serial || "").trim();
+  if (sn) return "sn:" + sn.toLowerCase();
+  const tag = String(i.tag || "").trim();
+  if (tag) return "tag:" + tag.toLowerCase();
+  return "";
+}
+
+// Open device-issue reports, grouped the way the Check-In/Out site groups
+// them: unresolved first, cleared below. Replaces the old damaged-on-return
+// list — a Damaged check-in files a report automatically, so the two showed
+// the same events, and this one also says whether anything was done about it.
+// Respects the Project filter, like everything else on this tab.
+function renderCioIssuesPanel(){
+  const el = document.getElementById("cio-issues-list");
   if (!el) return;
-  const damaged = checkins30d
-    .filter(e => e.condition === "Damaged")
-    .slice()
-    .sort((a, b) => (parseCioTs(b.ts)?.getTime() || 0) - (parseCioTs(a.ts)?.getTime() || 0));
-  if (damaged.length === 0){
-    el.innerHTML = '<div class="cio-empty">No damaged returns in the last 30 days.</div>';
+  if (!cioIssuesConfigured){
+    el.innerHTML = '<div class="cio-empty">Device issue log isn\'t configured yet.</div>';
     return;
   }
-  el.innerHTML = damaged.map(e => `
-    <div class="cio-damaged-row">
-      <div class="top">
-        <span>${escapeHtmlCio(e.model)}${e.serial ? ` · S/N ${escapeHtmlCio(e.serial)}` : ""}</span>
-        <span>${escapeHtmlCio(e.ts)}</span>
+  const rows = checkInOutIssues.filter(cioMatchesSelectedProject);
+  if (rows.length === 0){
+    el.innerHTML = '<div class="cio-empty">No device issues reported.</div>';
+    return;
+  }
+  const byRecency = (a, b) => parseCioIssueTs(b.ts) - parseCioIssueTs(a.ts);
+  const openRows = rows.filter(cioIssueIsOpen).sort(byRecency);
+  const clearedRows = rows.filter(i => !cioIssueIsOpen(i)).sort(byRecency);
+
+  const card = (i) => {
+    const isOpen = cioIssueIsOpen(i);
+    const title = [i.tag, i.deviceType].filter(Boolean).map(escapeHtmlCio).join(" — ") ||
+                  escapeHtmlCio(i.serial || "(unidentified item)");
+    const place = [i.project, i.location].filter(Boolean).map(escapeHtmlCio).join(" / ");
+    const line2 = [
+      i.serial ? `Serial ${escapeHtmlCio(i.serial)}` : "",
+      place
+    ].filter(Boolean).join(" · ");
+    const line3 = [
+      i.reportedBy ? `Reported by ${escapeHtmlCio(i.reportedBy)}` : "",
+      i.ts ? escapeHtmlCio(i.ts) : "",
+      i.context ? escapeHtmlCio(i.context) : ""
+    ].filter(Boolean).join(" · ");
+    return `
+    <div class="cio-issue-card ${isOpen ? "is-open" : ""}">
+      <div class="cio-issue-head">
+        <span class="cio-issue-title">${title}</span>
+        <span class="cio-issue-badge ${isOpen ? "is-open" : ""}">${escapeHtmlCio(i.status || "—")}</span>
       </div>
-      <div class="meta">Handled by ${escapeHtmlCio(cioPairNames(e))}${e.tag ? ` · ${escapeHtmlCio(e.tag)}` : ""}${e.project ? ` · ${escapeHtmlCio(e.project)}` : ""}</div>
-    </div>`).join("");
+      ${line2 ? `<div class="cio-issue-meta">${line2}</div>` : ""}
+      ${line3 ? `<div class="cio-issue-meta">${line3}</div>` : ""}
+      ${i.description ? `<div class="cio-issue-desc">${escapeHtmlCio(i.description)}</div>` : ""}
+      ${i.resolution ? `<div class="cio-issue-res"><div class="lbl">Resolution</div><div class="txt">${escapeHtmlCio(i.resolution)}</div></div>` : ""}
+    </div>`;
+  };
+
+  let html = "";
+  if (openRows.length){
+    html += `<div class="cio-issues-group">Needs attention · ${openRows.length}</div>` + openRows.map(card).join("");
+  }
+  if (clearedRows.length){
+    html += `<div class="cio-issues-group">Cleared · ${clearedRows.length}</div>` + clearedRows.map(card).join("");
+  }
+  el.innerHTML = html;
 }
 
 // A per-moderator, per-day timeline: a dot lands at the exact moment that
@@ -4819,7 +4952,12 @@ function cioHideDotTip(){ cioTlTip.classList.remove("show"); }
 render(); // render immediately from local cache so the page isn't blank while Excel loads
 loadFromExcel();
 loadCheckInOutData();
-setInterval(() => { if (document.visibilityState === "visible") loadCheckInOutData(); }, 25000);
+loadCheckInOutIssues();
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  loadCheckInOutData();
+  loadCheckInOutIssues();
+}, 25000);
 </script>
 </body>
 </html>
