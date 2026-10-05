@@ -244,6 +244,18 @@
   /* Device issue reports. Replaces the old "Reported damaged" list, which
      showed the same events from the other direction — what happened, rather
      than what's still unresolved. */
+  /* Unsaved-changes banner. A refused save used to be announced only by a
+     modal that could be dismissed and a one-line sync status that scrolls out
+     of view — so work could pile up unsaved with nothing on screen saying so. */
+  .unsaved-banner{display:none;margin:0 0 14px;border:1px solid var(--st-broken);border-left:4px solid var(--st-broken);border-radius:8px;padding:10px 14px;background:rgba(220,38,38,.07);}
+  .unsaved-banner.show{display:block;}
+  .ub-row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+  .ub-title{font-weight:700;font-size:13px;color:var(--st-broken);}
+  .ub-detail{color:var(--sub);font-size:12px;margin-top:3px;}
+  .ub-list{font-size:12px;margin-top:6px;color:var(--ink);}
+  .ub-list div{padding:2px 0;}
+  .ub-sub{margin-top:9px;padding-top:9px;border-top:1px solid var(--border);}
+  .unsaved-banner button{font-size:12px;padding:4px 10px;}
   .cio-issues-list{max-height:520px;overflow-y:auto;padding-right:4px;}
   .cio-issues-group{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:14px 0 7px;}
   .cio-issues-group:first-child{margin-top:0;}
@@ -482,6 +494,7 @@
 </header>
 
 <main>
+<div class="unsaved-banner" id="unsavedBanner"></div>
 
   <div class="page-tabs" id="page-tabs">
     <button class="tab-btn page-tab-btn active" data-page-tab="inventory">📋 Inventory</button>
@@ -1000,6 +1013,18 @@
 const MASTER = "Master Inventory";
 const MASTER_LOCATION = "WA.Redmond";
 const STORE_KEY = "hw-tracker-demo-v4";
+// Ids of rows this browser has changed but hasn't yet confirmed as saved to
+// Excel. This lives in localStorage, NOT just memory, and that is the whole
+// point: mergeRemoteDevices() protects a local row only while
+// recentlyEditedLocally() says so, and that check reads unsavedIds. When the
+// set was memory-only, a reload emptied it — so a device whose save had been
+// refused (stale tab after a deploy, or a sync conflict) lost its protection
+// and the very next merge deleted it. The stale-version modal tells you to
+// reload, which made the reload itself the thing that destroyed the device.
+const UNSAVED_KEY = "hw-tracker-unsaved-v1";
+// Log ids the user has acknowledged in the reconciliation warning, so a
+// deliberately deleted device doesn't nag forever.
+const RECON_DISMISS_KEY = "hw-tracker-recon-dismissed-v1";
 
 // Hardware/chip icon — replaces the old 🖥 emoji everywhere. Uses currentColor
 // so it automatically matches whatever text color surrounds it (violet when a
@@ -1481,6 +1506,99 @@ function mergeRemoteLog(rows){
 // Devices + Accessories are the shared source of truth in Excel. Every local
 // save() pushes the current arrays out; on page load we pull the latest
 // version back down so everyone's browser converges on the same data.
+// Cross-checks the activity log against the devices actually present. An
+// "add" with no matching device means the log recorded something the Devices
+// table never received — the exact divergence that hid two lost tablets for
+// two weeks. Matches on serial/asset tag rather than id, because device ids
+// get renumbered and the log keeps whatever id was current at the time.
+// Scoped to the last 7 days and dismissible, so a device that was added and
+// then deliberately deleted doesn't warn forever.
+const RECON_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+function reconDismissed(){
+  try { return new Set(JSON.parse(localStorage.getItem(RECON_DISMISS_KEY) || "[]")); }
+  catch (err){ return new Set(); }
+}
+function dismissReconEntry(logId){
+  const set = reconDismissed();
+  set.add(logId);
+  try { localStorage.setItem(RECON_DISMISS_KEY, JSON.stringify([...set])); } catch (err){}
+  renderUnsavedBanner();
+}
+function reconcileLogAgainstDevices(){
+  const dismissed = reconDismissed();
+  const serials = new Set(state.devices.map(d => String(d.serial || "").trim().toUpperCase()).filter(v => v && v !== "—"));
+  const tags = new Set(state.devices.map(d => String(d.tag || "").trim().toUpperCase()).filter(v => v && v !== "—"));
+  const cutoff = Date.now() - RECON_WINDOW_MS;
+  return (state.log || []).filter(e => {
+    if (e.type !== "add" || dismissed.has(e.id)) return false;
+    const t = new Date(e.ts);
+    if (isNaN(t.getTime()) || t.getTime() < cutoff) return false;
+    // In an add entry, "tag" holds the serial and "from" holds the asset tag.
+    const sn = String(e.tag || "").trim().toUpperCase();
+    const at = String(e.from || "").trim().toUpperCase();
+    if (sn && sn !== "—" && serials.has(sn)) return false;
+    if (at && at !== "—" && tags.has(at)) return false;
+    return true;
+  });
+}
+
+// Renders both warnings: rows waiting to reach Excel, and rows the log says
+// were added but that aren't in the data.
+function renderUnsavedBanner(){
+  const el = document.getElementById("unsavedBanner");
+  if (!el) return;
+  const pending = [...unsavedIds];
+  const missing = reconcileLogAgainstDevices();
+  if (pending.length === 0 && missing.length === 0){
+    el.classList.remove("show");
+    el.innerHTML = "";
+    return;
+  }
+  let html = "";
+  if (pending.length){
+    const why = versionStale
+      ? "This tab is running an outdated version, so saving is paused. Reload to send them."
+      : conflictBlocked
+        ? "Someone else changed the shared data, so saving is paused. Reload to send them."
+        : "Still syncing. If this doesn't clear in a moment, reload.";
+    const named = pending.map(id => {
+      const d = state.devices.find(x => String(x.id) === String(id));
+      if (d) return `${d.tag || "—"} · ${d.model || ""} ${d.serial && d.serial !== "—" ? "(S/N " + d.serial + ")" : ""}`.trim();
+      const a = state.accessories.find(x => String(x.id) === String(id));
+      if (a) return `${a.tag || "—"} · ${a.model || ""}`.trim();
+      const pr = state.props.find(x => String(x.id) === String(id));
+      if (pr) return `${pr.model || ""} ×${pr.qty}`.trim();
+      return String(id);
+    });
+    html += `
+      <div class="ub-row">
+        <div>
+          <div class="ub-title">${pending.length} change${pending.length === 1 ? "" : "s"} not yet saved to Excel</div>
+          <div class="ub-detail">${escapeHtmlCio(why)} Nothing is lost — these stay on this computer until they send.</div>
+          <div class="ub-list">${named.map(n => `<div>• ${escapeHtmlCio(n)}</div>`).join("")}</div>
+        </div>
+        <button id="ub-reload" class="primary">Reload now</button>
+      </div>`;
+  }
+  if (missing.length){
+    html += `
+      <div class="${pending.length ? "ub-sub" : ""}">
+        <div class="ub-title">${missing.length} logged addition${missing.length === 1 ? " is" : "s are"} missing from the data</div>
+        <div class="ub-detail">The activity log recorded ${missing.length === 1 ? "this" : "these"}, but ${missing.length === 1 ? "it isn't" : "they aren't"} in the inventory. Re-add, or dismiss if deleted on purpose.</div>
+        <div class="ub-list">${missing.map(e => `
+          <div>• ${escapeHtmlCio(String(e.from || "—"))} · ${escapeHtmlCio(String(e.model || ""))} (S/N ${escapeHtmlCio(String(e.tag || "—"))}) · ${escapeHtmlCio(String(e.ts || ""))}
+            <button class="ub-dismiss" data-log-id="${escapeHtmlCio(String(e.id))}">Dismiss</button></div>`).join("")}</div>
+      </div>`;
+  }
+  el.innerHTML = html;
+  el.classList.add("show");
+  const reloadBtn = document.getElementById("ub-reload");
+  if (reloadBtn) reloadBtn.onclick = () => location.reload();
+  el.querySelectorAll(".ub-dismiss").forEach(b => {
+    b.onclick = () => dismissReconEntry(b.getAttribute("data-log-id"));
+  });
+}
+
 function setSyncStatus(text){
   const el = document.getElementById("syncStatus");
   if (el) el.textContent = text;
@@ -1536,11 +1654,15 @@ const EDIT_GRACE_MS = 15000; // comfortably longer than a full check+save round 
 // periodic/refocus refresh would treat Excel's (still old) data as ground
 // truth and quietly erase the edit — which is exactly what was happening
 // here, several minutes apart, well outside that 15s window.
-let unsavedIds = new Set();
+let unsavedIds = new Set(JSON.parse(localStorage.getItem(UNSAVED_KEY) || "[]"));
+function persistUnsavedIds(){
+  try { localStorage.setItem(UNSAVED_KEY, JSON.stringify([...unsavedIds])); } catch (err){}
+}
 
 function markEdited(id){
   recentEdits[id] = Date.now();
   unsavedIds.add(id);
+  persistUnsavedIds();
   // Housekeeping: drop anything old enough that it can't matter anymore.
   const cutoff = Date.now() - EDIT_GRACE_MS;
   Object.keys(recentEdits).forEach(k => { if (recentEdits[k] < cutoff) delete recentEdits[k]; });
@@ -1858,7 +1980,17 @@ async function loadFromExcel(){
       props: state.props.length
     };
     render();
+    renderUnsavedBanner();
     setSyncStatus("Synced with Excel");
+    // Anything still unsaved from a previous session (a save that was refused
+    // because the tab was stale, then reloaded) has no edit of its own left to
+    // carry it to Excel — without this it would sit on this computer forever,
+    // which is the other half of how the two tablets went missing. Flushed
+    // here, after the merge, so the conflict check has a current baseline.
+    if (unsavedIds.size > 0 && !saveInFlight && !conflictBlocked && !versionStale){
+      console.log("Flushing " + unsavedIds.size + " unsaved change(s) left over from a previous session");
+      pushToExcel();
+    }
   } catch (err){
     console.error("Excel load failed:", err);
     setSyncStatus("Couldn't reach Excel — showing local data only");
@@ -1892,6 +2024,9 @@ let conflictBlocked = false;
 // a mismatch as a real external change again.
 let lastSaveCompletedAt = 0;
 const SAVE_SETTLE_MS = 15000;
+// The fingerprint our last successful save was written on top of. Used to
+// tell "Excel hasn't caught up with us yet" apart from "someone else edited".
+let prevLoadSnapshot = null;
 
 // A failed save (e.g. the Office Script timing out past Power Automate's
 // ~120s hard limit as the table's grown) used to just get logged to the
@@ -1929,6 +2064,7 @@ async function doPushToExcel(){
   if (versionStale){
     setSyncStatus("This tab is running an outdated version — reload to resume saving");
     showStaleVersionModal();
+    renderUnsavedBanner();
     return;
   }
   saveInFlight = true;
@@ -1937,23 +2073,33 @@ async function doPushToExcel(){
     // it, don't blindly overwrite whatever someone else just saved — this
     // is what let a stale background tab silently wipe out newly-added
     // equipment before. Block the save and make the user reload first.
-    if (Date.now() - lastSaveCompletedAt > SAVE_SETTLE_MS){
-      setSyncStatus("Checking for changes before saving…");
-      try {
-        const checkRes = await fetch(EXCEL_LOAD_URL);
-        if (checkRes.ok){
-          const freshData = await checkRes.json();
-          const freshFingerprint = computeFleetFingerprint(freshData);
-          if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot){
-            setSyncStatus("Couldn't save — someone else made changes");
-            conflictBlocked = true;
-            showSyncConflictModal();
-            return;
-          }
+    // The check now runs on EVERY save. It used to be skipped entirely
+    // within SAVE_SETTLE_MS of the previous save, which left a window where
+    // another tab's stale snapshot could overwrite without anything noticing.
+    // The window existed for a real reason though: Excel can take a few
+    // seconds to make our own just-written change visible, so a fresh read
+    // inside it may still show the PRE-save state and look like a conflict.
+    // Handled by accepting two fingerprints as "ours" — the state we just
+    // wrote (Excel caught up) and the one we wrote on top of (Excel lagging).
+    // Anything else is a genuine external change.
+    setSyncStatus("Checking for changes before saving…");
+    try {
+      const checkRes = await fetch(EXCEL_LOAD_URL);
+      if (checkRes.ok){
+        const freshData = await checkRes.json();
+        const freshFingerprint = computeFleetFingerprint(freshData);
+        const withinSettle = (Date.now() - lastSaveCompletedAt) <= SAVE_SETTLE_MS;
+        const looksLikeOurOwnLag = withinSettle && prevLoadSnapshot !== null && freshFingerprint === prevLoadSnapshot;
+        if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot && !looksLikeOurOwnLag){
+          setSyncStatus("Couldn't save — someone else made changes");
+          conflictBlocked = true;
+          showSyncConflictModal();
+          renderUnsavedBanner();
+          return;
         }
-      } catch (err){
-        console.error("Conflict check failed, saving anyway:", err);
       }
+    } catch (err){
+      console.error("Conflict check failed, saving anyway:", err);
     }
 
     setSyncStatus("Saving to Excel…");
@@ -2029,6 +2175,7 @@ async function doPushToExcel(){
       // was happening during a fast run of consecutive status changes. The
       // regular 25s / refocus refresh will pick up anything Excel-side once
       // it's actually caught up.
+      prevLoadSnapshot = lastLoadSnapshot;
       lastLoadSnapshot = computeFleetFingerprint({
         devices: outgoingDevices,
         accessories: outgoingAccessories,
@@ -2052,9 +2199,12 @@ async function doPushToExcel(){
       outgoingDevices.forEach(d => unsavedIds.delete(d.id));
       outgoingAccessories.forEach(a => unsavedIds.delete(a.id));
       outgoingProps.forEach(p => unsavedIds.delete(p.id));
+      persistUnsavedIds();
+      renderUnsavedBanner();
     } catch (err){
       console.error("Excel save failed:", err);
       setSyncStatus("Couldn't save to Excel — will retry shortly (change is safe locally either way)");
+    renderUnsavedBanner();
       // Don't just give up and wait for an unrelated future edit to carry
       // this forward — that could be indefinite. Retry on the normal debounced
       // path (so it still respects every existing guard) after a bounded delay,
@@ -4949,7 +5099,12 @@ function cioHideDotTip(){ cioTlTip.classList.remove("show"); }
   list.addEventListener("scroll", cioHideDotTip);
 })();
 
-render(); // render immediately from local cache so the page isn't blank while Excel loads
+render();
+// Surface anything left unsaved by a previous session straight away, before
+// any network call — this is the moment the old build silently dropped a
+// device whose save had been refused.
+renderUnsavedBanner();
+// render immediately from local cache so the page isn't blank while Excel loads
 loadFromExcel();
 loadCheckInOutData();
 loadCheckInOutIssues();
