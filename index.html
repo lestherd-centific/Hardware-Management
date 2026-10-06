@@ -1656,6 +1656,19 @@ const EDIT_GRACE_MS = 15000; // comfortably longer than a full check+save round 
 // here, several minutes apart, well outside that 15s window.
 let unsavedIds = new Set(JSON.parse(localStorage.getItem(UNSAVED_KEY) || "[]"));
 function persistUnsavedIds(){
+  // Prune ids whose row no longer exists before writing. Deleting a row
+  // removes it from state but never from unsavedIds — the save path only
+  // clears ids that appear in the outgoing payload, and a deleted row
+  // doesn't. That was harmless while this set lived in memory, but once it
+  // persists, a stale id would sit in localStorage forever: a permanent
+  // "1 change not yet saved" banner naming a raw id with nothing behind it,
+  // plus a pointless flush on every load.
+  const live = new Set([
+    ...(state.devices || []).map(d => String(d.id)),
+    ...(state.accessories || []).map(a => String(a.id)),
+    ...(state.props || []).map(pr => String(pr.id))
+  ]);
+  [...unsavedIds].forEach(id => { if (!live.has(String(id))) unsavedIds.delete(id); });
   try { localStorage.setItem(UNSAVED_KEY, JSON.stringify([...unsavedIds])); } catch (err){}
 }
 
@@ -2023,7 +2036,14 @@ let conflictBlocked = false;
 // our last write, Excel should genuinely be caught up, so it's safe to trust
 // a mismatch as a real external change again.
 let lastSaveCompletedAt = 0;
-const SAVE_SETTLE_MS = 15000;
+// Saves landing within this long of the previous one skip the pre-save read.
+// Was 15s, which left a wide window for another tab's stale snapshot to
+// overwrite unnoticed. Narrowed to 3s: long enough to keep a fast run of
+// consecutive edits from paying a full table read each time, short enough
+// that almost every save still verifies against Excel first. The read is not
+// free — with pagination on it now returns the whole Devices table — so this
+// is a deliberate speed/safety trade, not an oversight.
+const SAVE_SETTLE_MS = 3000;
 // The fingerprint our last successful save was written on top of. Used to
 // tell "Excel hasn't caught up with us yet" apart from "someone else edited".
 let prevLoadSnapshot = null;
@@ -2073,33 +2093,40 @@ async function doPushToExcel(){
     // it, don't blindly overwrite whatever someone else just saved — this
     // is what let a stale background tab silently wipe out newly-added
     // equipment before. Block the save and make the user reload first.
-    // The check now runs on EVERY save. It used to be skipped entirely
-    // within SAVE_SETTLE_MS of the previous save, which left a window where
-    // another tab's stale snapshot could overwrite without anything noticing.
-    // The window existed for a real reason though: Excel can take a few
-    // seconds to make our own just-written change visible, so a fresh read
-    // inside it may still show the PRE-save state and look like a conflict.
-    // Handled by accepting two fingerprints as "ours" — the state we just
-    // wrote (Excel caught up) and the one we wrote on top of (Excel lagging).
+    // Skipped only for a save landing within SAVE_SETTLE_MS (3s) of the last
+    // one, so a rapid run of edits doesn't pay a full table read each time.
+    // Everything else verifies against Excel first. Inside that window Excel
+    // may still be serving the PRE-save state, which would read as a false
+    // conflict — so two fingerprints count as "ours": the state we just wrote
+    // (Excel caught up) and the one we wrote on top of (Excel lagging).
     // Anything else is a genuine external change.
-    setSyncStatus("Checking for changes before saving…");
-    try {
-      const checkRes = await fetch(EXCEL_LOAD_URL);
-      if (checkRes.ok){
-        const freshData = await checkRes.json();
-        const freshFingerprint = computeFleetFingerprint(freshData);
-        const withinSettle = (Date.now() - lastSaveCompletedAt) <= SAVE_SETTLE_MS;
-        const looksLikeOurOwnLag = withinSettle && prevLoadSnapshot !== null && freshFingerprint === prevLoadSnapshot;
-        if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot && !looksLikeOurOwnLag){
-          setSyncStatus("Couldn't save — someone else made changes");
-          conflictBlocked = true;
-          showSyncConflictModal();
-          renderUnsavedBanner();
-          return;
+    // Skipped only for a save landing within SAVE_SETTLE_MS (3s) of the last
+    // one, so a fast run of consecutive edits doesn't pay a full table read
+    // each time. With pagination on, that read now returns the whole Devices
+    // table, so it isn't free. Every other save verifies against Excel first.
+    if ((Date.now() - lastSaveCompletedAt) > SAVE_SETTLE_MS){
+      setSyncStatus("Checking for changes before saving…");
+      try {
+        const checkRes = await fetch(EXCEL_LOAD_URL);
+        if (checkRes.ok){
+          const freshData = await checkRes.json();
+          const freshFingerprint = computeFleetFingerprint(freshData);
+          // Excel can lag behind our own last write, in which case a fresh
+          // read still shows the PRE-save state. That's not a conflict, so
+          // two fingerprints count as "ours": the state we just wrote, and
+          // the one we wrote on top of. Anything else is someone else.
+          const looksLikeOurOwnLag = prevLoadSnapshot !== null && freshFingerprint === prevLoadSnapshot;
+          if (lastLoadSnapshot !== null && freshFingerprint !== lastLoadSnapshot && !looksLikeOurOwnLag){
+            setSyncStatus("Couldn't save — someone else made changes");
+            conflictBlocked = true;
+            showSyncConflictModal();
+            renderUnsavedBanner();
+            return;
+          }
         }
+      } catch (err){
+        console.error("Conflict check failed, saving anyway:", err);
       }
-    } catch (err){
-      console.error("Conflict check failed, saving anyway:", err);
     }
 
     setSyncStatus("Saving to Excel…");
@@ -4149,6 +4176,8 @@ document.getElementById("delete-device-ok").onclick = () => {
     logActivity({ ts: new Date().toLocaleString(), type: "delete", tag: d.serial, from: d.bucket, to: "" });
     state.devices = state.devices.filter(x => x.id !== deviceDetailId);
   }
+  persistUnsavedIds();
+  renderUnsavedBanner();
   save();
   deleteDeviceModal.classList.remove("open");
   deviceDetailModal.classList.remove("open");
