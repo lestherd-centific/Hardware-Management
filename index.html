@@ -4651,11 +4651,25 @@ function renderCheckInOutDashboard(){
     <div class="cio-kpi"><div class="cio-label">Active mods, 7d</div><div class="cio-value">${activeMods7d}</div></div>
   `;
 
-  renderCioConditionChart(checkins30d);
-  renderCioIssuesPanel();
-  renderCioMiniList(openWithAge);
-  renderCioModTimeline();
-  renderCioSearchResult();
+  // Each panel renders inside its own guard. Previously one throw killed
+  // every step after it: renderCioConditionChart ran FIRST and needs Chart.js
+  // from a CDN, so when that CDN was unreachable the whole dashboard below
+  // the KPI row stayed blank — the KPI tile showed a real checked-out count
+  // while the list under it said nothing was out, because the KPI had already
+  // been written and the list never ran. Order matters too: the data people
+  // actually rely on now renders before anything that depends on a CDN.
+  cioSafeRender("checked-out list", () => renderCioMiniList(openWithAge));
+  cioSafeRender("moderator timeline", () => renderCioModTimeline());
+  cioSafeRender("device issues", () => renderCioIssuesPanel());
+  cioSafeRender("device search", () => renderCioSearchResult());
+  cioSafeRender("condition chart", () => renderCioConditionChart(checkins30d));
+}
+
+// Runs one dashboard panel, logging rather than throwing. A panel that fails
+// leaves its own area stale; it no longer takes the rest of the tab with it.
+function cioSafeRender(label, fn){
+  try { fn(); }
+  catch (err){ console.error("Check-In/Out panel failed to render (" + label + "):", err); }
 }
 
 // Which day the moderator timeline below is showing — always starts on
@@ -5080,6 +5094,15 @@ function renderCioConditionChart(checkins30d){
   legendEl.innerHTML = ["Good", "Fair", "Damaged"].map(k =>
     `<span><i style="background:${colors[k]};"></i>${k} · ${Math.round((counts[k] / total) * 100)}%</span>`
   ).join("");
+  // Chart.js comes from a CDN, so it can simply be absent — blocked, offline,
+  // or the request failed. The percentages above are the useful part and are
+  // already rendered, so hide the canvas and carry on rather than throwing.
+  if (typeof Chart === "undefined"){
+    document.getElementById("cioCondChart").style.display = "none";
+    legendEl.insertAdjacentHTML("beforeend",
+      '<span style="color:var(--sub);">· chart unavailable offline</span>');
+    return;
+  }
   if (cioCondChartInstance) cioCondChartInstance.destroy();
   cioCondChartInstance = new Chart(document.getElementById("cioCondChart"), {
     type: "doughnut",
