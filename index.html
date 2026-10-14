@@ -89,11 +89,9 @@
   .cio-row .cio-right{text-align:right;color:var(--sub);font-size:12.5px;white-space:nowrap;}
   .cio-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--st-broken-bg);color:var(--st-broken);white-space:nowrap;}
   .cio-empty{padding:10px 0;color:var(--sub);font-size:12.5px;}
-  .cio-charts{display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:start;}
-  .cio-chart-legend{display:flex;gap:16px;font-size:12px;color:var(--sub);margin-bottom:6px;flex-wrap:wrap;}
-  .cio-chart-legend span{display:inline-flex;align-items:center;gap:5px;}
-  .cio-chart-legend i{width:10px;height:10px;border-radius:2px;display:inline-block;}
-  @media (max-width: 900px){ .cio-charts{grid-template-columns:1fr;} }
+  .cio-issues-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;}
+  .cio-issues-link{font-size:12px;font-weight:600;color:var(--c-violet);text-decoration:none;white-space:nowrap;}
+  .cio-issues-link:hover{text-decoration:underline;}
 
   /* Mini "currently checked out" widget — pinned above the page tabs so
      leadership sees at-a-glance status regardless of which tab is open,
@@ -278,11 +276,13 @@
   .mp-chip{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--hover-bg);color:var(--sub);margin-left:5px;}
   .mp-chip.dmg{background:rgba(220,38,38,.12);color:var(--st-broken);}
   .mp-chip.out{background:rgba(217,119,6,.14);color:#b45309;}
-  .cio-issues-list{max-height:520px;overflow-y:auto;padding-right:4px;}
+  .cio-issues-list{max-height:560px;overflow-y:auto;padding-right:4px;}
   .cio-issues-group{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:14px 0 7px;}
   .cio-issues-group:first-child{margin-top:0;}
   .cio-issue-card{border:1px solid var(--border);border-left:3px solid var(--sub);border-radius:8px;padding:10px 12px;margin-bottom:8px;}
   .cio-issue-card.is-open{border-left-color:var(--st-broken);}
+  .cio-issue-card.is-fair{border-left-color:#d97706;}
+  .cio-issue-badge.is-fair{background:rgba(217,119,6,.14);color:#b45309;}
   .cio-issue-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
   .cio-issue-title{font-size:12.5px;font-weight:700;}
   .cio-issue-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--hover-bg);color:var(--sub);}
@@ -650,19 +650,13 @@
         </div>
       </div>
 
-      <div class="cio-charts">
-        <div>
-          <div class="cio-section-label">Device issues</div>
-          <div class="cio-issues-list" id="cio-issues-list"></div>
-        </div>
-        <div>
-          <div class="cio-section-label">Condition on return, last 30 days</div>
-          <div style="position:relative;width:100%;height:180px;">
-            <canvas id="cioCondChart" role="img" aria-label="Donut chart of returned-item condition over the last 30 days"></canvas>
-          </div>
-          <div class="cio-chart-legend" id="cio-cond-legend" style="margin-top:8px;"></div>
-        </div>
+      <div class="cio-issues-head">
+        <div class="cio-section-label" style="margin-bottom:0;">Device issues</div>
+        <a class="cio-issues-link" id="cio-issues-link" target="_blank" rel="noopener noreferrer"
+           href="https://digitaltechedge.sharepoint.com/:x:/r/sites/Oslo_Sesame_Moderators2/_layouts/15/Doc.aspx?sourcedoc=%7B5B90E19F-9AB9-44DC-A86C-B75F6C8E6525%7D&amp;file=Device%20Issue%20Report-1.xlsx&amp;action=default&amp;mobileredirect=true&amp;wdwpf=doclib-c"
+           title="Open the Device Issue Report workbook in SharePoint">↗ Open the full Device Issue Report</a>
       </div>
+      <div class="cio-issues-list" id="cio-issues-list"></div>
     </div>
   </div>
 
@@ -1043,7 +1037,10 @@
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<!-- Chart.js was only ever used by the condition donut, which has been
+     removed. Dropping the tag removes the app's last external runtime
+     dependency — and with it the failure mode where an unreachable CDN
+     blanked the Check-In/Out tab. -->
 <script>
 const MASTER = "Master Inventory";
 const MASTER_LOCATION = "WA.Redmond";
@@ -4478,12 +4475,9 @@ function applyTheme(theme){
 document.getElementById("themeToggle").addEventListener("click", () => {
   const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
   applyTheme(current === "dark" ? "light" : "dark");
-  // Chart.js can't read CSS variables from canvas, so its colors are picked
-  // at render time based on the theme attribute — redraw so a toggle takes
-  // effect immediately instead of waiting for the next poll.
-  if (typeof renderCheckInOutDashboard === "function" && document.getElementById("cioCondChart")){
-    renderCheckInOutDashboard();
-  }
+  // Nothing on the Check-In/Out tab needs a redraw on theme change any more:
+  // the one canvas (the condition donut) is gone, and everything else is
+  // styled with CSS variables that follow the theme attribute on their own.
 });
 
 // Top-level page tabs (Inventory / Check-In-Out Activity) — a plain
@@ -4696,18 +4690,15 @@ function renderCheckInOutDashboard(){
     <div class="cio-kpi"><div class="cio-label">Active mods, 7d</div><div class="cio-value">${activeMods7d}</div></div>
   `;
 
-  // Each panel renders inside its own guard. Previously one throw killed
-  // every step after it: renderCioConditionChart ran FIRST and needs Chart.js
-  // from a CDN, so when that CDN was unreachable the whole dashboard below
-  // the KPI row stayed blank — the KPI tile showed a real checked-out count
-  // while the list under it said nothing was out, because the KPI had already
-  // been written and the list never ran. Order matters too: the data people
-  // actually rely on now renders before anything that depends on a CDN.
+  // Each panel renders inside its own guard, so one throw can't take the rest
+  // of the tab down with it. This was added after a CDN-dependent chart threw
+  // first and blanked everything below the KPI row — the KPI showed a real
+  // checked-out count while the list under it said nothing was out. That
+  // chart is gone now, but the isolation is worth keeping on its own merits.
   cioSafeRender("checked-out list", () => renderCioMiniList(openWithAge));
   cioSafeRender("moderator timeline", () => renderCioModTimeline());
   cioSafeRender("device issues", () => renderCioIssuesPanel());
   cioSafeRender("device search", () => renderCioSearchResult());
-  cioSafeRender("condition chart", () => renderCioConditionChart(checkins30d));
 }
 
 // Runs one dashboard panel, logging rather than throwing. A panel that fails
@@ -4819,9 +4810,6 @@ function openCioModProfile(name){
   const lastOut = sessions.filter(s => s.outMs).sort((a, b) => b.outMs - a.outMs)[0];
   const lastIn  = sessions.filter(s => s.backMs).sort((a, b) => b.backMs - a.backMs)[0];
   const devices = new Set(sessions.map(s => s.tag || s.serial).filter(Boolean));
-  const partnerCounts = {};
-  sessions.forEach(s => { if (s.partner) partnerCounts[s.partner] = (partnerCounts[s.partner] || 0) + 1; });
-  const topPartner = Object.entries(partnerCounts).sort((a, b) => b[1] - a[1])[0];
   const damaged = sessions.filter(s => s.condition === "Damaged").length;
 
   document.getElementById("mp-title").textContent = name;
@@ -4839,7 +4827,6 @@ function openCioModProfile(name){
     stat("Distinct devices", String(devices.size)),
     stat("Last checked out", lastOut ? escapeHtmlCio(lastOut.outTs) : "—"),
     stat("Last checked in", lastIn ? escapeHtmlCio(lastIn.backTs) : "—"),
-    stat("Most frequent partner", topPartner ? `${escapeHtmlCio(topPartner[0])} <span style="font-weight:400;color:var(--sub);">×${topPartner[1]}</span>` : "worked alone"),
     stat("Returned damaged", String(damaged), damaged > 0)
   ].join("");
 
@@ -4976,13 +4963,18 @@ function cioIssueDeviceKey(i){
 function renderCioIssuesPanel(){
   const el = document.getElementById("cio-issues-list");
   if (!el) return;
+  // Fair returns come from the checkout log, not the issues workbook, so they
+  // must still render when the issues flow is unconfigured or has nothing.
+  const fairHtml = cioFairReturnsHtml();
   if (!cioIssuesConfigured){
-    el.innerHTML = '<div class="cio-empty">Device issue log isn\'t configured yet.</div>';
+    el.innerHTML = '<div class="cio-empty">Device issue log isn\'t configured yet.</div>' + fairHtml;
     return;
   }
   const rows = checkInOutIssues.filter(cioMatchesSelectedProject);
   if (rows.length === 0){
-    el.innerHTML = '<div class="cio-empty">No device issues reported.</div>';
+    el.innerHTML = fairHtml
+      ? fairHtml
+      : '<div class="cio-empty">No device issues reported.</div>';
     return;
   }
   const byRecency = (a, b) => parseCioIssueTs(b.ts) - parseCioIssueTs(a.ts);
@@ -5020,10 +5012,57 @@ function renderCioIssuesPanel(){
   if (openRows.length){
     html += `<div class="cio-issues-group">Needs attention · ${openRows.length}</div>` + openRows.map(card).join("");
   }
+  html += cioFairReturnsHtml();
   if (clearedRows.length){
     html += `<div class="cio-issues-group">Cleared · ${clearedRows.length}</div>` + clearedRows.map(card).join("");
   }
   el.innerHTML = html;
+}
+
+// Devices handed back in Fair condition, with whatever the moderator wrote.
+// These are NOT filed reports — no status, no owner, no resolution — so they
+// get their own group rather than sitting among things the Audit Lead is
+// actually tracking. A Damaged return auto-files a report and shows above;
+// Fair doesn't, which is exactly why it would otherwise go unseen.
+// Everything still in the log, newest first; the log is trimmed periodically
+// so that is naturally bounded.
+function cioFairReturns(){
+  return checkInOutLog
+    .filter(e => e.eventType === "checkin"
+              && String(e.condition || "").trim().toLowerCase() === "fair"
+              && cioMatchesSelectedProject(e))
+    .slice()
+    .sort((a, b) => (parseCioTs(b.ts)?.getTime() || 0) - (parseCioTs(a.ts)?.getTime() || 0));
+}
+
+function cioFairReturnsHtml(){
+  const fair = cioFairReturns();
+  if (!fair.length) return "";
+  const card = (e) => {
+    const title = [e.tag, e.model].filter(Boolean).map(escapeHtmlCio).join(" — ") ||
+                  escapeHtmlCio(e.serial || "(unidentified item)");
+    const line2 = [
+      e.serial ? `Serial ${escapeHtmlCio(e.serial)}` : "",
+      [e.project, e.location].filter(Boolean).map(escapeHtmlCio).join(" / ")
+    ].filter(Boolean).join(" · ");
+    const line3 = [
+      e.modName ? `Returned by ${escapeHtmlCio(cioPairNames(e))}` : "",
+      e.ts ? escapeHtmlCio(e.ts) : ""
+    ].filter(Boolean).join(" · ");
+    return `
+    <div class="cio-issue-card is-fair">
+      <div class="cio-issue-head">
+        <span class="cio-issue-title">${title}</span>
+        <span class="cio-issue-badge is-fair">Fair</span>
+      </div>
+      ${line2 ? `<div class="cio-issue-meta">${line2}</div>` : ""}
+      ${line3 ? `<div class="cio-issue-meta">${line3}</div>` : ""}
+      ${e.notes
+        ? `<div class="cio-issue-desc">${escapeHtmlCio(e.notes)}</div>`
+        : `<div class="cio-issue-desc" style="color:var(--sub);font-style:italic;">No reason given.</div>`}
+    </div>`;
+  };
+  return `<div class="cio-issues-group">Returned Fair · ${fair.length}</div>` + fair.map(card).join("");
 }
 
 // A per-moderator, per-day timeline: a dot lands at the exact moment that
@@ -5296,41 +5335,6 @@ function escapeHtmlCio(s){
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
 
-let cioCondChartInstance = null;
-function renderCioConditionChart(checkins30d){
-  const counts = { Good: 0, Fair: 0, Damaged: 0 };
-  checkins30d.forEach(e => { if (counts[e.condition] !== undefined) counts[e.condition]++; });
-  const total = counts.Good + counts.Fair + counts.Damaged;
-  const legendEl = document.getElementById("cio-cond-legend");
-  if (total === 0){
-    document.getElementById("cioCondChart").style.display = "none";
-    legendEl.innerHTML = '<span style="color:var(--sub);">No check-ins in the last 30 days.</span>';
-    return;
-  }
-  document.getElementById("cioCondChart").style.display = "";
-  const colors = { Good: "#16a34a", Fair: "#d97706", Damaged: "#dc2626" };
-  legendEl.innerHTML = ["Good", "Fair", "Damaged"].map(k =>
-    `<span><i style="background:${colors[k]};"></i>${k} · ${Math.round((counts[k] / total) * 100)}%</span>`
-  ).join("");
-  // Chart.js comes from a CDN, so it can simply be absent — blocked, offline,
-  // or the request failed. The percentages above are the useful part and are
-  // already rendered, so hide the canvas and carry on rather than throwing.
-  if (typeof Chart === "undefined"){
-    document.getElementById("cioCondChart").style.display = "none";
-    legendEl.insertAdjacentHTML("beforeend",
-      '<span style="color:var(--sub);">· chart unavailable offline</span>');
-    return;
-  }
-  if (cioCondChartInstance) cioCondChartInstance.destroy();
-  cioCondChartInstance = new Chart(document.getElementById("cioCondChart"), {
-    type: "doughnut",
-    data: {
-      labels: ["Good", "Fair", "Damaged"],
-      datasets: [{ data: [counts.Good, counts.Fair, counts.Damaged], backgroundColor: [colors.Good, colors.Fair, colors.Damaged], borderColor: getComputedStyle(document.documentElement).getPropertyValue("--panel") || "#fff", borderWidth: 2 }]
-    },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-  });
-}
 
 // Timeline dot tooltips. These used to be a pure-CSS ::after on the dot, but
 // .cio-timeline-list is now a scroll container (10 mods visible, rest scrolls)
