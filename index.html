@@ -4536,7 +4536,9 @@ async function loadCheckInOutData(){
     const data = await res.json();
     checkInOutLog = (data.checkoutLog || []).map(r => ({
       id: String(r.id || ""), checkoutId: String(r.checkoutId || ""), eventType: String(r.eventType || ""),
-      ts: String(r.ts || ""), modName: String(r.modName || ""), deviceId: String(r.deviceId || ""),
+      // modName/partner are trimmed at the source so every lookup, grouping
+      // and roster entry keyed on a name matches regardless of stray spaces.
+      ts: String(r.ts || ""), modName: String(r.modName || "").trim(), deviceId: String(r.deviceId || ""),
       tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
       project: String(r.project || ""), location: String(r.location || ""),
       condition: String(r.condition || ""), notes: String(r.notes || ""),
@@ -4544,14 +4546,18 @@ async function loadCheckInOutData(){
       // paired with at sign-in and puts that name here; blank means alone.
       // Both names live on ONE row — the event is not written twice — so
       // checkoutId pairing is untouched.
-      partner: String(r.partner || ""),
+      partner: String(r.partner || "").trim(),
       // Read for the moderator profile panel. Both already exist in the
       // CheckoutLog table; nothing on the flow side needed changing.
       destination: String(r.destination || ""),
       sessionRole: String(r.sessionRole || "")
     })).filter(r => r.id);
     checkInOutMods = (data.credentials || []).map(r => ({
-      name: String(r.name || ""), login: String(r.login || ""), role: String(r.role || "")
+      // Trimmed: the Credentials sheet has at least one name stored with a
+      // trailing space ("Andrew Castro "), and an untrimmed name is a
+      // DIFFERENT string from the same name in the log — which put the same
+      // person on the timeline twice and split their history in two.
+      name: String(r.name || "").trim(), login: String(r.login || "").trim(), role: String(r.role || "").trim()
     })).filter(m => m.name);
     renderCheckInOutDashboard();
   } catch (err){
@@ -4747,15 +4753,32 @@ function cioFormatHourLabel(hour){
 // own project so nothing is hidden while you're filtered.
 // ---------------------------------------------------------------------------
 function cioModSessions(name){
-  const mine = checkInOutLog.filter(e =>
-    String(e.modName || "").trim() === name || String(e.partner || "").trim() === name);
+  const key = String(name || "").trim().toLowerCase();
+  const isMine = e => String(e.modName || "").trim().toLowerCase() === key
+                   || String(e.partner || "").trim().toLowerCase() === key;
+
+  // Which sessions involve this person. Note this only SELECTS the sessions —
+  // it must not also be the set the events are read from. Moderators routinely
+  // check in each other's kit, so a session's checkin row can name somebody
+  // else entirely; pairing inside this person's own rows then never saw the
+  // return and every such session looked permanently open. That's what showed
+  // items as "5.3d so far · Overdue" while the dashboard correctly counted
+  // zero out — the dashboard pairs across the whole log, and now so does this.
+  const myCheckoutIds = new Set();
+  checkInOutLog.forEach(e => { if (isMine(e)) myCheckoutIds.add(e.checkoutId || e.id); });
+
   const byCo = {};
-  mine.forEach(e => {
+  checkInOutLog.forEach(e => {
     const k = e.checkoutId || e.id;
+    if (!myCheckoutIds.has(k)) return;
     if (!byCo[k]) byCo[k] = { out: null, back: null };
-    if (e.eventType === "checkout") byCo[k].out = e;
-    // A device checked in twice keeps the FIRST return — the real one.
-    else if (e.eventType === "checkin" && !byCo[k].back) byCo[k].back = e;
+    const t = parseCioTs(e.ts)?.getTime() || 0;
+    if (e.eventType === "checkout"){
+      if (!byCo[k].out || t < (parseCioTs(byCo[k].out.ts)?.getTime() || 0)) byCo[k].out = e;
+    } else if (e.eventType === "checkin"){
+      // A device checked in twice keeps the EARLIEST return — the real one.
+      if (!byCo[k].back || t < (parseCioTs(byCo[k].back.ts)?.getTime() || 0)) byCo[k].back = e;
+    }
   });
   const now = Date.now();
   return Object.values(byCo).map(p => {
@@ -4764,7 +4787,7 @@ function cioModSessions(name){
     const outMs = p.out ? (parseCioTs(p.out.ts)?.getTime() || 0) : 0;
     const backMs = p.back ? (parseCioTs(p.back.ts)?.getTime() || 0) : 0;
     // withName is the OTHER person on the row, whichever side this mod was on.
-    const other = String(src.modName || "").trim() === name
+    const other = String(src.modName || "").trim().toLowerCase() === key
       ? String(src.partner || "").trim()
       : String(src.modName || "").trim();
     const heldMs = p.back ? Math.max(0, backMs - outMs) : (outMs ? now - outMs : 0);
@@ -4773,7 +4796,7 @@ function cioModSessions(name){
       project: src.project, location: src.location,
       destination: src.destination || "", sessionRole: src.sessionRole || "",
       partner: other,
-      signedOutBySomeoneElse: String(src.modName || "").trim() !== name,
+      signedOutBySomeoneElse: String(src.modName || "").trim().toLowerCase() !== key,
       outTs: p.out ? p.out.ts : "", backTs: p.back ? p.back.ts : "",
       outMs, backMs, heldMs,
       stillOut: !!p.out && !p.back,
@@ -5062,8 +5085,19 @@ function renderCioModTimeline(){
   });
   Object.values(byMod).forEach(list => list.sort((a, b) => a.tMs - b.tMs));
 
-  const names = new Set(checkInOutMods.map(m => m.name));
-  Object.keys(byMod).forEach(n => names.add(n));
+  // Deduplicated on a normalised key so the same person can't appear twice
+  // from a spelling difference (stray spaces are trimmed at the source now;
+  // this also folds case variants). The first spelling seen is displayed.
+  const byKey = new Map();
+  const addName = (n) => {
+    const name = String(n || "").trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, name);
+  };
+  checkInOutMods.forEach(m => addName(m.name));
+  Object.keys(byMod).forEach(addName);
+  const names = new Set(byKey.values());
 
   if (names.size === 0){
     listEl.innerHTML = '<div class="cio-empty">No moderators added yet.</div>';
