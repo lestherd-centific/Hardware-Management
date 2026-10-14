@@ -256,6 +256,28 @@
   .ub-list div{padding:2px 0;}
   .ub-sub{margin-top:9px;padding-top:9px;border-top:1px solid var(--border);}
   .unsaved-banner button{font-size:12px;padding:4px 10px;}
+  .cio-mod-link{cursor:pointer;}
+  .cio-mod-link:hover{color:var(--c-violet);text-decoration:underline;}
+  .cio-mod-link:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;border-radius:3px;}
+  .modal.mp-modal{width:min(94vw, 760px);max-height:88vh;overflow-y:auto;}
+  .mp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:2px;}
+  .mp-sub{font-size:12px;color:var(--sub);margin-bottom:12px;}
+  .mp-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:8px;margin-bottom:14px;}
+  .mp-stat{background:var(--hover-bg);border-radius:8px;padding:8px 10px;}
+  .mp-stat .lbl{font-size:10.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;}
+  .mp-stat .val{font-size:13px;font-weight:700;margin-top:2px;line-height:1.35;overflow-wrap:anywhere;}
+  .mp-stat .val.danger{color:var(--st-broken);}
+  .mp-section{font-size:12.5px;font-weight:700;margin:14px 0 7px;}
+  .mp-list{max-height:320px;overflow-y:auto;padding-right:4px;}
+  .mp-row{border:1px solid var(--border);border-left:3px solid var(--sub);border-radius:8px;padding:8px 11px;margin-bottom:7px;}
+  .mp-row.out{border-left-color:#d97706;}
+  .mp-row.overdue{border-left-color:var(--st-broken);}
+  .mp-row .top{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;font-weight:600;}
+  .mp-row .when{font-weight:400;color:var(--sub);white-space:nowrap;}
+  .mp-row .meta{font-size:11.5px;color:var(--sub);margin-top:3px;}
+  .mp-chip{display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--hover-bg);color:var(--sub);margin-left:5px;}
+  .mp-chip.dmg{background:rgba(220,38,38,.12);color:var(--st-broken);}
+  .mp-chip.out{background:rgba(217,119,6,.14);color:#b45309;}
   .cio-issues-list{max-height:520px;overflow-y:auto;padding-right:4px;}
   .cio-issues-group{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--sub);margin:14px 0 7px;}
   .cio-issues-group:first-child{margin-top:0;}
@@ -955,6 +977,19 @@
       <button id="archive-confirm-cancel">Cancel</button>
       <button id="archive-confirm-ok" class="primary" style="background:var(--st-broken);border-color:var(--st-broken);">Archive</button>
     </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modProfileBackdrop">
+  <div class="modal mp-modal">
+    <div class="mp-head">
+      <h3 id="mp-title">Moderator</h3>
+      <button id="mp-close" class="dd-close-x" title="Close">✕</button>
+    </div>
+    <div class="mp-sub" id="mp-sub"></div>
+    <div class="mp-stats" id="mp-stats"></div>
+    <div id="mp-body"></div>
+    <div class="modal-actions"><button id="mp-close-2">Close</button></div>
   </div>
 </div>
 
@@ -4509,7 +4544,11 @@ async function loadCheckInOutData(){
       // paired with at sign-in and puts that name here; blank means alone.
       // Both names live on ONE row — the event is not written twice — so
       // checkoutId pairing is untouched.
-      partner: String(r.partner || "")
+      partner: String(r.partner || ""),
+      // Read for the moderator profile panel. Both already exist in the
+      // CheckoutLog table; nothing on the flow side needed changing.
+      destination: String(r.destination || ""),
+      sessionRole: String(r.sessionRole || "")
     })).filter(r => r.id);
     checkInOutMods = (data.credentials || []).map(r => ({
       name: String(r.name || ""), login: String(r.login || ""), role: String(r.role || "")
@@ -4697,6 +4736,151 @@ function cioFormatHourLabel(hour){
   if (h === 12) return "12pm";
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
+
+// ---------------------------------------------------------------------------
+// Moderator profile
+//
+// Assembles one person's whole history out of checkInOutLog: every session
+// they were on, as the person who signed the kit out OR as the named partner,
+// since a pair shares a single log row. Deliberately ignores the tab's Project
+// filter — a person's history is a person's history, and each row states its
+// own project so nothing is hidden while you're filtered.
+// ---------------------------------------------------------------------------
+function cioModSessions(name){
+  const mine = checkInOutLog.filter(e =>
+    String(e.modName || "").trim() === name || String(e.partner || "").trim() === name);
+  const byCo = {};
+  mine.forEach(e => {
+    const k = e.checkoutId || e.id;
+    if (!byCo[k]) byCo[k] = { out: null, back: null };
+    if (e.eventType === "checkout") byCo[k].out = e;
+    // A device checked in twice keeps the FIRST return — the real one.
+    else if (e.eventType === "checkin" && !byCo[k].back) byCo[k].back = e;
+  });
+  const now = Date.now();
+  return Object.values(byCo).map(p => {
+    const src = p.out || p.back;
+    if (!src) return null;
+    const outMs = p.out ? (parseCioTs(p.out.ts)?.getTime() || 0) : 0;
+    const backMs = p.back ? (parseCioTs(p.back.ts)?.getTime() || 0) : 0;
+    // withName is the OTHER person on the row, whichever side this mod was on.
+    const other = String(src.modName || "").trim() === name
+      ? String(src.partner || "").trim()
+      : String(src.modName || "").trim();
+    const heldMs = p.back ? Math.max(0, backMs - outMs) : (outMs ? now - outMs : 0);
+    return {
+      tag: src.tag, model: src.model, serial: src.serial,
+      project: src.project, location: src.location,
+      destination: src.destination || "", sessionRole: src.sessionRole || "",
+      partner: other,
+      signedOutBySomeoneElse: String(src.modName || "").trim() !== name,
+      outTs: p.out ? p.out.ts : "", backTs: p.back ? p.back.ts : "",
+      outMs, backMs, heldMs,
+      stillOut: !!p.out && !p.back,
+      overdue: !!p.out && !p.back && heldMs > CHECKINOUT_OVERDUE_HOURS * 3600000,
+      condition: p.back ? (p.back.condition || "") : ""
+    };
+  }).filter(Boolean).sort((a, b) => (b.outMs || b.backMs) - (a.outMs || a.backMs));
+}
+
+function cioHeldLabel(ms){
+  const h = ms / 3600000;
+  if (h < 1) return Math.max(1, Math.round(ms / 60000)) + "m";
+  return h < 24 ? (Math.round(h * 10) / 10) + "h" : (Math.round(h / 24 * 10) / 10) + "d";
+}
+
+function openCioModProfile(name){
+  const sessions = cioModSessions(name);
+  const held = sessions.filter(s => s.stillOut);
+  const returned = sessions.filter(s => !s.stillOut);
+  const lastOut = sessions.filter(s => s.outMs).sort((a, b) => b.outMs - a.outMs)[0];
+  const lastIn  = sessions.filter(s => s.backMs).sort((a, b) => b.backMs - a.backMs)[0];
+  const devices = new Set(sessions.map(s => s.tag || s.serial).filter(Boolean));
+  const partnerCounts = {};
+  sessions.forEach(s => { if (s.partner) partnerCounts[s.partner] = (partnerCounts[s.partner] || 0) + 1; });
+  const topPartner = Object.entries(partnerCounts).sort((a, b) => b[1] - a[1])[0];
+  const damaged = sessions.filter(s => s.condition === "Damaged").length;
+
+  document.getElementById("mp-title").textContent = name;
+  const span = sessions.length
+    ? `${sessions.length} session${sessions.length === 1 ? "" : "s"} in the log` +
+      (lastOut || lastIn ? ` · covers everything currently kept in the check-in/out log` : "")
+    : "No check-in/out activity in the log.";
+  document.getElementById("mp-sub").textContent = span;
+
+  const stat = (lbl, val, danger) =>
+    `<div class="mp-stat"><div class="lbl">${lbl}</div><div class="val ${danger ? "danger" : ""}">${val}</div></div>`;
+  document.getElementById("mp-stats").innerHTML = [
+    stat("Currently out", String(held.length), held.some(h => h.overdue)),
+    stat("Sessions", String(sessions.length)),
+    stat("Distinct devices", String(devices.size)),
+    stat("Last checked out", lastOut ? escapeHtmlCio(lastOut.outTs) : "—"),
+    stat("Last checked in", lastIn ? escapeHtmlCio(lastIn.backTs) : "—"),
+    stat("Most frequent partner", topPartner ? `${escapeHtmlCio(topPartner[0])} <span style="font-weight:400;color:var(--sub);">×${topPartner[1]}</span>` : "worked alone"),
+    stat("Returned damaged", String(damaged), damaged > 0)
+  ].join("");
+
+  const row = (s) => {
+    const cls = s.stillOut ? (s.overdue ? "out overdue" : "out") : "";
+    const chips = [
+      s.stillOut ? `<span class="mp-chip out">${s.overdue ? "Overdue" : "Still out"}</span>` : "",
+      s.condition ? `<span class="mp-chip ${s.condition === "Damaged" ? "dmg" : ""}">${escapeHtmlCio(s.condition)}</span>` : "",
+      s.signedOutBySomeoneElse ? `<span class="mp-chip">As partner</span>` : ""
+    ].join("");
+    const meta = [
+      s.partner ? `with ${escapeHtmlCio(s.partner)}` : "alone",
+      [s.project, s.location].filter(Boolean).map(escapeHtmlCio).join(" / "),
+      s.destination ? `→ ${escapeHtmlCio(s.destination)}` : "",
+      s.sessionRole ? escapeHtmlCio(s.sessionRole) : ""
+    ].filter(Boolean).join(" · ");
+    const when = s.stillOut
+      ? `out ${escapeHtmlCio(s.outTs)} · ${cioHeldLabel(s.heldMs)} so far`
+      : `${escapeHtmlCio(s.outTs || "?")} → ${escapeHtmlCio(s.backTs)}${s.outMs && s.backMs ? ` · ${cioHeldLabel(s.heldMs)}` : ""}`;
+    return `
+      <div class="mp-row ${cls}">
+        <div class="top">
+          <span>${escapeHtmlCio(s.model || "(unknown)")}${s.tag ? " · " + escapeHtmlCio(s.tag) : ""}${chips}</span>
+          <span class="when">${when}</span>
+        </div>
+        <div class="meta">${meta}${s.serial ? " · S/N " + escapeHtmlCio(s.serial) : ""}</div>
+      </div>`;
+  };
+
+  let html = "";
+  if (held.length){
+    html += `<div class="mp-section">Currently holding · ${held.length}</div><div class="mp-list">${held.map(row).join("")}</div>`;
+  }
+  if (returned.length){
+    html += `<div class="mp-section">History · ${returned.length}</div><div class="mp-list">${returned.map(row).join("")}</div>`;
+  }
+  if (!sessions.length){
+    html = `<div class="cio-empty">Nothing recorded for this moderator in the current log. The check-in/out log is trimmed periodically, so older activity may no longer be present.</div>`;
+  }
+  document.getElementById("mp-body").innerHTML = html;
+  document.getElementById("modProfileBackdrop").classList.add("open");
+}
+
+const modProfileModal = document.getElementById("modProfileBackdrop");
+if (modProfileModal){
+  document.getElementById("mp-close").onclick = () => modProfileModal.classList.remove("open");
+  document.getElementById("mp-close-2").onclick = () => modProfileModal.classList.remove("open");
+  modProfileModal.addEventListener("click", e => { if (e.target === modProfileModal) modProfileModal.classList.remove("open"); });
+}
+// Delegated, so it survives every re-render of the timeline rows.
+(function wireCioModLinks(){
+  const list = document.getElementById("cio-timeline-list");
+  if (!list) return;
+  const open = el => { const n = el.getAttribute("data-mod"); if (n) openCioModProfile(n); };
+  list.addEventListener("click", e => {
+    const el = e.target.closest && e.target.closest(".cio-mod-link");
+    if (el) open(el);
+  });
+  list.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const el = e.target.closest && e.target.closest(".cio-mod-link");
+    if (el){ e.preventDefault(); open(el); }
+  });
+})();
 
 // Pulls the device-issue log. Its own fetch and its own try/catch so a
 // failure here can't take the rest of the Check-In/Out tab down with it —
@@ -4922,7 +5106,7 @@ function renderCioModTimeline(){
 
   listEl.innerHTML = rows.map(r => `
     <div class="cio-timeline-row">
-      <span class="cio-timeline-name">${escapeHtmlCio(r.name)}${r.hasOffWindow ? ` <span class="cio-timeline-offhours" title="Has activity outside the hours shown — check &quot;Show full 24 hours&quot;">⏱</span>` : ""}</span>
+      <span class="cio-timeline-name cio-mod-link" role="button" tabindex="0" data-mod="${escapeHtmlCio(r.name)}" title="View ${escapeHtmlCio(r.name)}'s history">${escapeHtmlCio(r.name)}${r.hasOffWindow ? ` <span class="cio-timeline-offhours" title="Has activity outside the hours shown — check &quot;Show full 24 hours&quot;">⏱</span>` : ""}</span>
       <div class="cio-timeline-track">
         <div class="cio-timeline-baseline"></div>
         ${r.dots.map(d => `<span class="cio-timeline-dot ${d.color}" style="left:${(d.frac * 100).toFixed(3)}%;" data-tip="${escapeHtmlCio(d.label)}"></span>`).join("")}
