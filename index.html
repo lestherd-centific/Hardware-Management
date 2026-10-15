@@ -5238,28 +5238,87 @@ function renderCioModTimeline(){
   const nowAxisFrac = (nowRawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
   const showNowMarker = today && nowAxisFrac >= 0 && nowAxisFrac <= 1;
 
-  // All matching-project events, grouped by moderator and time-sorted —
-  // used both to check whether a mod was already holding equipment at this
-  // day's midnight (checked out on a prior day, still not returned) and to
-  // place a dot for each of this day's own events.
-  const byMod = {};
-  checkInOutLog.filter(cioMatchesSelectedProject).forEach(e => {
+  // Sessions resolved by checkoutId across the WHOLE log, exactly as the KPI
+  // (cioOpenCheckouts) and the profile (cioModSessions) do.
+  //
+  // This used to be a +1-per-checkout / -1-per-checkin COUNTER run over a
+  // single moderator's own rows, which was wrong in both directions.
+  // Moderators routinely check in each other's kit, so a return written by a
+  // third party never cancelled the checkout and the row kept a pinned
+  // "Still out" dot at the start of the track forever — while the KPI and
+  // the profile, pairing across the whole log, correctly said nothing was
+  // out. And because it was a bare count rather than a per-session fact, an
+  // unrelated return could cancel a genuinely open checkout and hide it.
+  // Resolving each session independently fixes both.
+  const sessions = {};
+  checkInOutLog.forEach(e => {
     const t = parseCioTs(e.ts);
     if (!t) return;
-    const partner = String(e.partner || "").trim();
-    // withName is whoever the OTHER person on this event is, from the
-    // perspective of the row it's being placed on — that's what the dot's
-    // tooltip names.
-    if (e.modName) (byMod[e.modName] = byMod[e.modName] || []).push({ ...e, tMs: t.getTime(), withName: partner });
-    // The pair share a single log row, so without mirroring it here the
-    // second name has an empty track all day and reads as "did nothing".
-    // This also feeds openCountAtDayStart below, so a partner still holding
-    // equipment from a previous day correctly shows as still out.
-    if (partner && partner !== e.modName){
-      (byMod[partner] = byMod[partner] || []).push({ ...e, tMs: t.getTime(), withName: String(e.modName || "").trim() });
+    const k = e.checkoutId || e.id;
+    if (!k) return;
+    const s = sessions[k] || (sessions[k] = { out: null, outMs: 0, back: null, backMs: 0 });
+    const ms = t.getTime();
+    if (e.eventType === "checkout"){
+      if (!s.out || ms < s.outMs){ s.out = e; s.outMs = ms; }
+    } else if (e.eventType === "checkin"){
+      // A device checked in twice keeps the EARLIEST return — the real one.
+      if (!s.back || ms < s.backMs){ s.back = e; s.backMs = ms; }
     }
   });
-  Object.values(byMod).forEach(list => list.sort((a, b) => a.tMs - b.tMs));
+
+  // Everyone named on a row — the pair share one row, so both names count.
+  const rowNames = (e) => {
+    if (!e) return [];
+    const a = String(e.modName || "").trim();
+    const b = String(e.partner || "").trim();
+    return (b && b.toLowerCase() !== a.toLowerCase() ? [a, b] : [a]).filter(Boolean);
+  };
+  // The OTHER person on a row, from the perspective of the row it is being
+  // placed on — that is what the dot's tooltip names.
+  const otherName = (e, self) => rowNames(e)
+    .find(n => n.toLowerCase() !== String(self || "").trim().toLowerCase()) || "";
+
+  const byMod = {};
+  const slot = (n) => {
+    const name = String(n || "").trim();
+    if (!name) return null;
+    return byMod[name] || (byMod[name] = { held: [], events: [] });
+  };
+  // Register every name in the matching-project log first, so a moderator
+  // with no activity today still gets an (empty) track rather than vanishing.
+  checkInOutLog.filter(cioMatchesSelectedProject).forEach(e => rowNames(e).forEach(slot));
+
+  Object.values(sessions).forEach(s => {
+    const src = s.out || s.back;
+    if (!src || !cioMatchesSelectedProject(src)) return;
+    const outNames = rowNames(s.out);
+    const backNames = rowNames(s.back);
+
+    // Holding belongs to whoever signed it out.
+    if (s.out && s.outMs < dayStart && (!s.back || s.backMs >= dayStart)){
+      outNames.forEach(n => { const m = slot(n); if (m) m.held.push(s); });
+    }
+    if (s.out && s.outMs >= dayStart && s.outMs < dayEnd){
+      outNames.forEach(n => { const m = slot(n); if (m) m.events.push({ ms: s.outMs, type: "checkout", row: s.out }); });
+    }
+    if (s.back && s.backMs >= dayStart && s.backMs < dayEnd){
+      // The return lands on the track of everyone in the session, not just
+      // whoever typed it in — otherwise a moderator whose kit a colleague
+      // returned keeps a checkout dot with nothing closing it, which is the
+      // phantom "still out" this whole block exists to avoid.
+      const seen = new Set();
+      [].concat(backNames, outNames).forEach(n => {
+        const key = String(n || "").trim().toLowerCase();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        const m = slot(n);
+        if (!m) return;
+        const byOther = !backNames.some(b => b.toLowerCase() === key);
+        m.events.push({ ms: s.backMs, type: "checkin", row: s.back,
+                        returnedBy: byOther ? String(s.back.modName || "").trim() : "" });
+      });
+    }
+  });
 
   // Deduplicated on a normalised key so the same person can't appear twice
   // from a spelling difference (stray spaces are trimmed at the source now;
@@ -5286,30 +5345,49 @@ function renderCioModTimeline(){
   };
 
   const rows = Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b)).map(name => {
-    const events = byMod[name] || [];
-    let openCountAtDayStart = 0;
-    let lastOpenTs = null;
-    let lastOpenWith = "";
-    events.forEach(e => {
-      if (e.tMs >= dayStart) return;
-      if (e.eventType === "checkout"){ openCountAtDayStart++; lastOpenTs = e.ts; lastOpenWith = e.withName || ""; }
-      else if (e.eventType === "checkin") openCountAtDayStart = Math.max(0, openCountAtDayStart - 1);
-    });
-
+    const m = byMod[name] || { held: [], events: [] };
     const dots = [];
     let hasOffWindow = false;
-    if (openCountAtDayStart > 0){
-      // Already holding equipment as of midnight — pin a marker at the
-      // very start of the visible axis instead of dropping it, since no
-      // NEW event happens today to place a dot at.
-      dots.push({ frac: 0, color: "yellow", label: `Still out — checked out ${lastOpenTs ? timeFmt(lastOpenTs) : "earlier"}${lastOpenWith ? ` (with ${lastOpenWith})` : ""}` });
+
+    if (m.held.length){
+      // Already holding equipment as of midnight — pin a marker at the very
+      // start of the visible axis instead of dropping it, since no NEW event
+      // happens today to place a dot at. One marker however many items; the
+      // tooltip carries the count and the oldest checkout, which is the one
+      // at risk of going overdue.
+      // "Still out" is a claim about NOW, so only make it when something
+      // really is open. A device carried in from a previous day and handed
+      // back during this one is closed by its own green dot further along
+      // the track; saying "still out" there is the false alarm that sent
+      // people looking for kit nobody was holding.
+      const open = m.held.filter(s => !s.back || s.backMs >= dayEnd);
+      const base = (open.length ? open : m.held).slice().sort((a, b) => a.outMs - b.outMs);
+      const oldest = base[0];
+      const n = base.length;
+      const when = parseCioTs(oldest.out.ts);
+      const sameOrPrevDay = when && when.getTime() >= dayStart - 86400000;
+      const whenLabel = !when ? "earlier"
+        : sameOrPrevDay ? timeFmt(oldest.out.ts)
+        : when.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + ", " + timeFmt(oldest.out.ts);
+      const withName = otherName(oldest.out, name);
+      const withLabel = withName ? ` (with ${withName})` : "";
+      const items = `${n} item${n === 1 ? "" : "s"}`;
+      dots.push({ frac: 0, color: "yellow",
+        label: open.length
+          ? `Still out — ${items}, oldest checked out ${whenLabel}${withLabel}`
+          : `Already out at the start of the day — ${items} checked out ${whenLabel}${withLabel}, returned ${today ? "today" : "later that day"}` });
     }
-    events.filter(e => e.tMs >= dayStart && e.tMs < dayEnd).forEach(e => {
-      const rawFrac = (e.tMs - dayStart) / 86400000;
+
+    m.events.slice().sort((a, b) => a.ms - b.ms).forEach(ev => {
+      const rawFrac = (ev.ms - dayStart) / 86400000;
       const axisFrac = (rawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
-      const label = `${e.eventType === "checkout" ? "Checked out" : "Checked back in"} ${timeFmt(e.ts)}${e.withName ? ` (with ${e.withName})` : ""}`;
       if (axisFrac < 0 || axisFrac > 1){ hasOffWindow = true; return; }
-      dots.push({ frac: axisFrac, color: e.eventType === "checkout" ? "yellow" : "green", label });
+      const withName = otherName(ev.row, name);
+      const label = ev.type === "checkout"
+        ? `Checked out ${timeFmt(ev.row.ts)}${withName ? ` (with ${withName})` : ""}`
+        : `Checked back in ${timeFmt(ev.row.ts)}`
+          + (ev.returnedBy ? ` by ${ev.returnedBy}` : (withName ? ` (with ${withName})` : ""));
+      dots.push({ frac: axisFrac, color: ev.type === "checkout" ? "yellow" : "green", label });
     });
     return { name, dots, hasOffWindow };
   });
