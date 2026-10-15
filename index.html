@@ -103,6 +103,43 @@
   .cio-hist-stat .val.danger{color:var(--st-broken);}
   .cio-hist-stat .val.ok{color:var(--st-inuse);}
   .cio-hist-list{max-height:560px;overflow-y:auto;padding-right:4px;}
+
+  /* Check-in / check-out activity — grouped trip cards, plus the raw
+     per-row view behind the same switch. Every class here is prefixed
+     cio-act- so none of it can collide with the Hardware Management tab's
+     own .log-* activity aside, which is a different dataset entirely. */
+  .cio-act-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:22px;}
+  .cio-act-everything{font-size:12px;font-weight:600;color:var(--c-violet);cursor:pointer;background:none;border:0;font-family:inherit;padding:0;}
+  .cio-act-everything:hover{text-decoration:underline;}
+  .cio-act-everything:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;}
+  .cio-act-switch{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 6px;}
+  .cio-act-mode{border:1px solid var(--border);background:var(--panel);color:var(--sub);font-family:inherit;font-size:12px;font-weight:600;padding:5px 13px;border-radius:999px;cursor:pointer;}
+  .cio-act-mode:hover{color:var(--ink);}
+  .cio-act-mode.active{background:var(--c-violet-soft);border-color:var(--c-violet-soft);color:var(--c-violet);}
+  .cio-act-mode:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;}
+  .cio-act-count{font-size:12px;color:var(--sub);margin-bottom:8px;}
+  .cio-act-list{max-height:620px;overflow-y:auto;padding-right:4px;}
+  .cio-act-day{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--c-violet);margin:14px 0 6px;}
+  .cio-act-day:first-child{margin-top:0;}
+  .cio-act-group{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:var(--panel);font-size:13px;}
+  .cio-act-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+  .cio-act-who{font-weight:700;}
+  .cio-act-time{color:var(--sub);font-size:12px;white-space:nowrap;}
+  .cio-act-meta{color:var(--sub);font-size:12px;margin-top:2px;}
+  .cio-act-meta i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle;}
+  .cio-act-meta i.out{background:var(--c-pink);}
+  .cio-act-meta i.in{background:var(--st-inuse);}
+  .cio-act-flag{color:var(--c-pink);font-weight:600;}
+  .cio-act-devs{margin-top:8px;display:flex;flex-direction:column;gap:4px;}
+  .cio-act-dev{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:4px 8px;border-radius:6px;background:var(--hover-bg);}
+  .cio-act-dev .tagname{font-weight:600;}
+  .cio-act-dev .mdl{color:var(--sub);}
+  .cio-act-note{color:var(--sub);font-size:12px;margin-top:2px;font-style:italic;}
+  .cio-act-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;}
+  .cio-act-pill.fair{background:var(--cond-fair-bg);color:var(--cond-fair);}
+  .cio-act-pill.bad{background:var(--st-broken-bg);color:var(--st-broken);}
+  .cio-act-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:8px;padding:7px 10px;margin-bottom:5px;background:var(--panel);font-size:12.5px;}
+  .cio-act-right{display:flex;gap:8px;align-items:center;white-space:nowrap;}
   .cio-issue-card.is-done{border-left-color:var(--st-inuse);}
   .cio-issue-badge.is-done{background:var(--st-inuse-bg);color:var(--st-inuse);}
   .cio-issue-badge.is-repeat{background:var(--cond-fair-bg);color:var(--cond-fair);}
@@ -691,6 +728,17 @@
       <div class="cio-hist-bubbles" id="cio-hist-bubbles"></div>
       <div class="cio-hist-stats" id="cio-hist-stats"></div>
       <div class="cio-hist-list" id="cio-hist-list"></div>
+
+      <div class="cio-act-head">
+        <div class="cio-section-label" style="margin-bottom:0;">Check-in / check-out activity</div>
+        <button type="button" class="cio-act-everything" id="cio-act-everything">Show everything</button>
+      </div>
+      <div class="cio-act-switch" id="cio-act-switch">
+        <button type="button" class="cio-act-mode active" data-act-mode="grouped">Grouped</button>
+        <button type="button" class="cio-act-mode" data-act-mode="rows">All rows</button>
+      </div>
+      <div class="cio-act-count" id="cio-act-count"></div>
+      <div class="cio-act-list" id="cio-act-list"></div>
     </div>
   </div>
 
@@ -4560,7 +4608,7 @@ async function loadCheckInOutData(){
     const res = await fetch(CHECKINOUT_LOAD_URL, { method: "POST" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
-    checkInOutLog = (data.checkoutLog || []).map(r => ({
+    checkInOutLog = (data.checkoutLog || []).map((r, i) => ({
       id: String(r.id || ""), checkoutId: String(r.checkoutId || ""), eventType: String(r.eventType || ""),
       // modName/partner are trimmed at the source so every lookup, grouping
       // and roster entry keyed on a name matches regardless of stray spaces.
@@ -4576,7 +4624,12 @@ async function loadCheckInOutData(){
       // Read for the moderator profile panel. Both already exist in the
       // CheckoutLog table; nothing on the flow side needed changing.
       destination: String(r.destination || ""),
-      sessionRole: String(r.sessionRole || "")
+      sessionRole: String(r.sessionRole || ""),
+      // Table order, stamped at read time. The grouped activity view sorts on
+      // this rather than on ts, because ts is a formatted locale string and
+      // comparing those as text puts 10/9 above 10/13 and September above
+      // October. Nothing else reads it.
+      _row: i
     })).filter(r => r.id);
     checkInOutMods = (data.credentials || []).map(r => ({
       // Trimmed: the Credentials sheet has at least one name stored with a
@@ -4731,6 +4784,7 @@ function renderCheckInOutDashboard(){
   cioSafeRender("moderator timeline", () => renderCioModTimeline());
   cioSafeRender("device issues", () => renderCioIssuesPanel());
   cioSafeRender("issue history", () => renderCioIssueHistory());
+  cioSafeRender("activity", () => renderCioActivity());
   cioSafeRender("device search", () => renderCioSearchResult());
 }
 
@@ -5200,6 +5254,236 @@ function cioFairReturnsHtml(){
     </div>`;
   };
   return `<div class="cio-issues-group">Returned Fair · ${fair.length}</div>` + fair.map(card).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Check-in / check-out activity.
+//
+// One log row is one device, so a trip where somebody moved five devices
+// reads as five separate events. "Grouped" folds a run of consecutive rows
+// back into the batch they actually were — one card per person per trip —
+// while "All rows" keeps the raw one-row-per-device view. Both read the same
+// data and respect the Project filter; neither writes anything.
+// ---------------------------------------------------------------------------
+
+// How far apart two consecutive rows may be and still belong to the same
+// trip. Measured against the PREVIOUS row in the group, never the first, so
+// a batch that took twenty minutes to type in still holds together while the
+// morning trip and the afternoon trip stay separate.
+const CIO_ACT_GAP_MS = 5 * 60 * 1000;
+// A cap on ROWS walked, not on cards produced. Capping cards would drop whole
+// trips off the end; capping rows just shortens the last card.
+const CIO_ACT_MAX_ROWS = 500;
+const CIO_ACT_RECENT_DAYS = 2;
+
+let cioActMode = "grouped";  // "grouped" | "rows"
+let cioActShowAll = false;   // false = last CIO_ACT_RECENT_DAYS days
+
+function cioActRows(){
+  const rows = checkInOutLog
+    .filter(cioMatchesSelectedProject)
+    .slice()
+    // Newest first by TABLE ORDER. Deliberately not a ts comparison: ts is a
+    // formatted locale string, and sorting those as text puts 10/9 above
+    // 10/13 and September above October.
+    .sort((a, b) => (b._row || 0) - (a._row || 0));
+  const windowed = cioActShowAll ? rows : rows.filter(r => {
+    const t = parseCioTs(r.ts);
+    // A row with no readable date is never hidden by the window — it would
+    // vanish with no way to tell it had ever been there.
+    return !t || t.getTime() >= Date.now() - CIO_ACT_RECENT_DAYS * 86400000;
+  });
+  return windowed.slice(0, CIO_ACT_MAX_ROWS);
+}
+
+// What has to match for two consecutive rows to be the same trip. Any field
+// the log doesn't carry is simply absent here rather than invented.
+function cioActKey(r){
+  const n = s => String(s || "").trim().toLowerCase();
+  // destination is normalised for the KEY only — the first row's own
+  // spelling is what gets displayed. The workbook holds both "LV LAB" and
+  // "Lv lab" for the same place, and a verbatim key would split one trip
+  // into two cards.
+  return [n(r.modName), n(r.partner), n(r.eventType), n(r.project), n(r.location), n(r.destination)].join("\u0000");
+}
+
+// Orders a list newest-first by parsed time. Both views use it, so they can
+// never disagree about what order the same data is in.
+//
+// Display order has to be decided separately from table order. Table order is
+// what makes "consecutive rows" mean anything when chaining a batch together,
+// but if a row ever lands out of table order (a late sync, a hand edit in the
+// workbook) it drags its day heading along with it and the list reads
+// Today / Yesterday / Today.
+//
+// This compares parsed Dates numerically, never the formatted ts strings —
+// comparing those as text is the bug that sorts 10/9 above 10/13 and
+// September above October, and it is not reintroduced here.
+//
+// Anything with no readable time inherits the position of the dated entry
+// before it, so it stays where it was instead of jumping to one end.
+// Array.prototype.sort is stable, so equal keys keep their relative order.
+function cioActOrderByTime(list, msOf){
+  let carry = Infinity;
+  return list
+    .map(x => { const ms = msOf(x); if (ms !== null) carry = ms; return { x, k: ms === null ? carry : ms }; })
+    .sort((a, b) => b.k - a.k)
+    .map(e => e.x);
+}
+
+function cioActMs(r){
+  const t = parseCioTs(r.ts);
+  return t ? t.getTime() : null;
+}
+
+function cioActGroups(rows){
+  const groups = [];
+  rows.forEach(r => {
+    const ms = cioActMs(r);
+    const last = groups[groups.length - 1];
+    // A row whose timestamp can't be read never joins a group and never
+    // absorbs one: with no time there is no way to know it belongs, and
+    // swallowing it would also cost it its own day heading.
+    if (ms !== null && last && last.key !== null && last.lastMs !== null &&
+        last.key === cioActKey(r) && Math.abs(last.lastMs - ms) <= CIO_ACT_GAP_MS){
+      last.rows.push(r);
+      last.lastMs = ms;   // chain against the previous row, not the first
+      return;
+    }
+    groups.push({ key: ms === null ? null : cioActKey(r), rows: [r], ms, lastMs: ms });
+  });
+
+  // Table order is what makes "consecutive rows" meaningful, so the walk
+  // above has to follow it — but it must not also decide DISPLAY order.
+  return cioActOrderByTime(groups, g => g.ms);
+}
+
+// Blank condition is not a problem — it just means nobody recorded one.
+function cioActNotGood(r){
+  const c = String(r.condition || "").trim();
+  return c !== "" && c.toLowerCase() !== "good";
+}
+function cioActWho(r){
+  const mod = String(r.modName || "").trim() || "(unknown)";
+  const p = String(r.partner || "").trim();
+  return p && p.toLowerCase() !== mod.toLowerCase() ? mod + " + " + p : mod;
+}
+function cioActTime(r){
+  const t = parseCioTs(r.ts);
+  return t ? t.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : String(r.ts || "—");
+}
+function cioActDayLabel(ms){
+  if (ms === null || ms === undefined) return "Date unknown";
+  const d = new Date(ms); d.setHours(0, 0, 0, 0);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today.getTime() - d.getTime()) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  if (diff > 1 && diff < 7) return new Date(ms).toLocaleDateString(undefined, { weekday: "long" });
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+function cioActVerb(r){
+  return r.eventType === "checkout" ? "Checked out"
+       : r.eventType === "checkin" ? "Checked in"
+       : (String(r.eventType || "").trim() || "Logged");
+}
+// A condition pill ONLY when the condition isn't Good. A column of green
+// "Good" badges is noise that hides the one row that isn't.
+function cioActPill(r){
+  if (!cioActNotGood(r)) return "";
+  const cond = String(r.condition || "").trim();
+  return `<span class="cio-act-pill ${cond.toLowerCase() === "fair" ? "fair" : "bad"}">${escapeHtmlCio(cond)}</span>`;
+}
+function cioActDevLine(r){
+  const note = String(r.notes || "").trim();
+  return `<div class="cio-act-dev">
+      <span><span class="tagname">${escapeHtmlCio(r.tag || "—")}</span> <span class="mdl">${escapeHtmlCio(r.model || "")}${r.serial ? " · " + escapeHtmlCio(r.serial) : ""}</span>${note ? `<div class="cio-act-note">${escapeHtmlCio(note)}</div>` : ""}</span>
+      ${cioActPill(r)}
+    </div>`;
+}
+function cioActCardHtml(g){
+  const f = g.rows[0];
+  const isOut = f.eventType === "checkout";
+  const n = g.rows.length;
+  const where = [f.project, f.location].filter(Boolean).join(" / ");
+  const dest = String(f.destination || "").trim();
+  const notGood = g.rows.filter(cioActNotGood).length;
+  return `<div class="cio-act-group">
+      <div class="cio-act-top">
+        <span class="cio-act-who">${escapeHtmlCio(cioActWho(f))}</span>
+        <span class="cio-act-time">${escapeHtmlCio(cioActTime(f))}</span>
+      </div>
+      <div class="cio-act-meta"><i class="${isOut ? "out" : "in"}"></i>${escapeHtmlCio(cioActVerb(f))} ${n} device${n === 1 ? "" : "s"}${where ? " · " + escapeHtmlCio(where) : ""}${dest ? " → " + escapeHtmlCio(dest) : ""}${notGood ? ` · <span class="cio-act-flag">${notGood} not Good</span>` : ""}</div>
+      <div class="cio-act-devs">${g.rows.map(cioActDevLine).join("")}</div>
+    </div>`;
+}
+function cioActRowHtml(r){
+  const isOut = r.eventType === "checkout";
+  const where = [r.project, r.location].filter(Boolean).join(" / ");
+  const dest = String(r.destination || "").trim();
+  const note = String(r.notes || "").trim();
+  return `<div class="cio-act-row">
+      <span><span class="tagname">${escapeHtmlCio(r.tag || "—")}</span> <span class="mdl">${escapeHtmlCio(r.model || "")}${r.serial ? " · " + escapeHtmlCio(r.serial) : ""}</span>
+        <div class="cio-act-meta"><i class="${isOut ? "out" : "in"}"></i>${escapeHtmlCio(cioActVerb(r))} · ${escapeHtmlCio(cioActWho(r))}${where ? " · " + escapeHtmlCio(where) : ""}${dest ? " → " + escapeHtmlCio(dest) : ""}</div>
+        ${note ? `<div class="cio-act-note">${escapeHtmlCio(note)}</div>` : ""}</span>
+      <span class="cio-act-right">${cioActPill(r)}<span class="cio-act-time">${escapeHtmlCio(cioActTime(r))}</span></span>
+    </div>`;
+}
+
+function renderCioActivity(){
+  const listEl = document.getElementById("cio-act-list");
+  const countEl = document.getElementById("cio-act-count");
+  const everyEl = document.getElementById("cio-act-everything");
+  if (!listEl) return;
+
+  document.querySelectorAll("#cio-act-switch .cio-act-mode").forEach(b =>
+    b.classList.toggle("active", b.getAttribute("data-act-mode") === cioActMode));
+  if (everyEl) everyEl.textContent = cioActShowAll ? `Show last ${CIO_ACT_RECENT_DAYS} days` : "Show everything";
+
+  const rows = cioActRows();
+  if (countEl){
+    // Say what the number counts. It counts device rows, not cards, so a
+    // reader never tries to match it against the cards on screen and
+    // conclude something is missing.
+    countEl.textContent = (cioActShowAll ? "All activity" : `Last ${CIO_ACT_RECENT_DAYS} days`)
+      + ` · ${rows.length} device row${rows.length === 1 ? "" : "s"}`;
+  }
+  if (!rows.length){
+    listEl.innerHTML = '<div class="cio-empty">No check-in/out activity in this period.</div>';
+    return;
+  }
+
+  let html = "", lastDay = null;
+  const heading = (ms) => {
+    const day = cioActDayLabel(ms);
+    if (day === lastDay) return "";
+    lastDay = day;
+    return `<div class="cio-act-day">${escapeHtmlCio(day)}</div>`;
+  };
+  if (cioActMode === "grouped"){
+    // Day headings come from each group's FIRST row.
+    cioActGroups(rows).forEach(g => { html += heading(g.ms) + cioActCardHtml(g); });
+  } else {
+    cioActOrderByTime(rows, cioActMs).forEach(r => {
+      html += heading(cioActMs(r)) + cioActRowHtml(r);
+    });
+  }
+  listEl.innerHTML = html;
+}
+
+// Static markup, so these are wired once rather than on every render.
+const cioActSwitchEl = document.getElementById("cio-act-switch");
+if (cioActSwitchEl){
+  cioActSwitchEl.addEventListener("click", (e) => {
+    const b = e.target.closest && e.target.closest("[data-act-mode]");
+    if (!b) return;
+    cioActMode = b.getAttribute("data-act-mode");
+    renderCioActivity();
+  });
+}
+const cioActEveryEl = document.getElementById("cio-act-everything");
+if (cioActEveryEl){
+  cioActEveryEl.addEventListener("click", () => { cioActShowAll = !cioActShowAll; renderCioActivity(); });
 }
 
 // A per-moderator, per-day timeline: a dot lands at the exact moment that
