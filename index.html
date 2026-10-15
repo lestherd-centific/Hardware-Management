@@ -4735,15 +4735,36 @@ function cioOpenCheckouts(){
 // themselves are sorted with any overdue group first, then by longest
 // outstanding item, so the riskiest moderators surface at the top of both
 // the mini widget and the full list.
+// Groups open checkouts by the PAIR that signed them out, not by the one
+// name in modName. Moderators work in twos and both names live on a single
+// row, so keying on modName alone hid the partner completely: a kit taken out
+// by Shanoya with Antonio listed only Shanoya, and Antonio appeared nowhere,
+// so you could not find his gear by scanning the list.
+//
+// Grouping by the pair rather than listing the kit under each person keeps
+// the counts summing to the "Currently checked out" KPI. Listing it twice
+// would read as ten devices out when five are.
+function cioOpenPairKey(c){
+  const names = [String(c.modName || "").trim(), String(c.partner || "").trim()]
+    .filter(Boolean).map(n => n.toLowerCase());
+  if (!names.length) return "(unknown)";
+  // Sorted, so a row written "A with B" and one written "B with A" are the
+  // same pair rather than two groups holding half the kit each.
+  return names.slice().sort().join("\u0000");
+}
+
 function groupOpenByMod(openWithAge){
   const byMod = {};
   openWithAge.forEach(c => {
-    const key = c.modName || "(unknown)";
+    const key = cioOpenPairKey(c);
     if (!byMod[key]) byMod[key] = [];
     byMod[key].push(c);
   });
-  return Object.entries(byMod).map(([modName, items]) => {
+  return Object.values(byMod).map(items => {
     const sorted = items.slice().sort((a, b) => b.ms - a.ms);
+    // Named from the longest-outstanding row, so the heading phrasing is
+    // stable rather than depending on which row happened to be first.
+    const modName = cioPairNames(sorted[0]) || "(unknown)";
     return { modName, items: sorted, count: sorted.length, overdue: sorted.some(i => i.overdue), maxMs: sorted[0].ms };
   }).sort((a, b) => (b.overdue - a.overdue) || (b.maxMs - a.maxMs));
 }
@@ -5832,7 +5853,7 @@ function renderCioMiniList(openWithAge){
       const ageLabel = cioAgeLabel(c.ms);
       return `
       <div class="cio-mini-subrow">
-        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}${String(c.partner || "").trim() ? ` · with ${escapeHtmlCio(String(c.partner).trim())}` : ""}</span></span>
+        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span></span>
         <span>${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</span>
         <span class="${c.overdue ? "overdue" : ""}">${ageLabel}${c.overdue ? " · overdue" : ""}</span>
       </div>`;
