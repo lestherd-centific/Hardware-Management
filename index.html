@@ -89,6 +89,23 @@
   .cio-row .cio-right{text-align:right;color:var(--sub);font-size:12.5px;white-space:nowrap;}
   .cio-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--st-broken-bg);color:var(--st-broken);white-space:nowrap;}
   .cio-empty{padding:10px 0;color:var(--sub);font-size:12.5px;}
+  /* Device issue history — device-type bubbles, summary tiles, full log. */
+  .cio-hist-bubbles{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;}
+  .cio-hist-bub{border:1px solid var(--border);background:var(--panel);color:var(--sub);font-family:inherit;font-size:12px;font-weight:600;padding:5px 13px;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+  .cio-hist-bub:hover{color:var(--ink);}
+  .cio-hist-bub .n{font-weight:700;opacity:.7;font-size:11px;}
+  .cio-hist-bub.active{background:var(--c-violet-soft);border-color:var(--c-violet-soft);color:var(--c-violet);}
+  .cio-hist-bub:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;}
+  .cio-hist-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:14px;}
+  .cio-hist-stat{background:var(--hover-bg);border-radius:8px;padding:9px 12px;}
+  .cio-hist-stat .lbl{font-size:10.5px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;}
+  .cio-hist-stat .val{font-size:17px;font-weight:700;margin-top:2px;}
+  .cio-hist-stat .val.danger{color:var(--st-broken);}
+  .cio-hist-stat .val.ok{color:var(--st-inuse);}
+  .cio-hist-list{max-height:560px;overflow-y:auto;padding-right:4px;}
+  .cio-issue-card.is-done{border-left-color:var(--st-inuse);}
+  .cio-issue-badge.is-done{background:var(--st-inuse-bg);color:var(--st-inuse);}
+  .cio-issue-badge.is-repeat{background:var(--cond-fair-bg);color:var(--cond-fair);}
   .cio-issues-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px;}
   .cio-issues-link{font-size:12px;font-weight:600;color:var(--c-violet);text-decoration:none;white-space:nowrap;}
   .cio-issues-link:hover{text-decoration:underline;}
@@ -669,6 +686,11 @@
            title="Open the Device Issue Report workbook in SharePoint">↗ Open the full Device Issue Report</a>
       </div>
       <div class="cio-issues-list" id="cio-issues-list"></div>
+
+      <div class="cio-section-label" style="margin-top:22px;">Device issue history</div>
+      <div class="cio-hist-bubbles" id="cio-hist-bubbles"></div>
+      <div class="cio-hist-stats" id="cio-hist-stats"></div>
+      <div class="cio-hist-list" id="cio-hist-list"></div>
     </div>
   </div>
 
@@ -4708,6 +4730,7 @@ function renderCheckInOutDashboard(){
   cioSafeRender("checked-out list", () => renderCioMiniList(openWithAge));
   cioSafeRender("moderator timeline", () => renderCioModTimeline());
   cioSafeRender("device issues", () => renderCioIssuesPanel());
+  cioSafeRender("issue history", () => renderCioIssueHistory());
   cioSafeRender("device search", () => renderCioSearchResult());
 }
 
@@ -5027,6 +5050,110 @@ function renderCioIssuesPanel(){
     html += `<div class="cio-issues-group">Cleared · ${clearedRows.length}</div>` + clearedRows.map(card).join("");
   }
   el.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// Device issue history
+//
+// A per-device-type view of the SAME issue reports shown above, but complete:
+// open and closed together, newest first, so there's a documented record of
+// how often a given class of kit fails. Matched on the report's Device Type
+// by keyword, because that column is free text — "Ambi-Mic", "DJI Mic 3" and
+// "DJI Lavalier Mic" should all land under Mic without needing an exact list.
+// ---------------------------------------------------------------------------
+const CIO_HISTORY_CATEGORIES = [
+  { key: "all",     label: "All",      match: () => true },
+  { key: "macbook", label: "MacBook",  match: t => t.includes("macbook") },
+  // "MM Wave" is the Radio Wave Transmitters — nothing is literally named
+  // "MM Wave"; that string is a PROJECT name in the checkout log, not a model.
+  { key: "mmwave",  label: "MM Wave",  match: t => t.includes("radio wave") },
+  { key: "mic",     label: "Mic",      match: t => t.includes("mic") }
+];
+let cioHistoryFilter = "all";
+
+function cioHistoryRows(categoryKey){
+  const cat = CIO_HISTORY_CATEGORIES.find(c => c.key === categoryKey) || CIO_HISTORY_CATEGORIES[0];
+  return checkInOutIssues
+    .filter(cioMatchesSelectedProject)
+    .filter(i => cat.match(String(i.deviceType || "").trim().toLowerCase()));
+}
+
+// Resolved and Replaced both mean the device is back in circulation.
+function cioIssueIsClosed(i){ return !cioIssueIsOpen(i); }
+
+function renderCioIssueHistory(){
+  const bubblesEl = document.getElementById("cio-hist-bubbles");
+  const statsEl = document.getElementById("cio-hist-stats");
+  const listEl = document.getElementById("cio-hist-list");
+  if (!bubblesEl || !statsEl || !listEl) return;
+
+  bubblesEl.innerHTML = CIO_HISTORY_CATEGORIES.map(c => {
+    const n = cioHistoryRows(c.key).length;
+    return `<button type="button" class="cio-hist-bub ${c.key === cioHistoryFilter ? "active" : ""}" data-hist="${c.key}">`
+         + `${escapeHtmlCio(c.label)} <span class="n">${n}</span></button>`;
+  }).join("");
+
+  const rows = cioHistoryRows(cioHistoryFilter)
+    .slice()
+    .sort((a, b) => parseCioIssueTs(b.ts) - parseCioIssueTs(a.ts));
+
+  const openCount = rows.filter(cioIssueIsOpen).length;
+  const devices = new Set(rows.map(cioIssueDeviceKey).filter(Boolean));
+  statsEl.innerHTML = [
+    ["Reports", String(rows.length), ""],
+    ["Still open", String(openCount), openCount ? "danger" : ""],
+    ["Resolved", String(rows.length - openCount), rows.length - openCount ? "ok" : ""],
+    ["Devices affected", String(devices.size), ""]
+  ].map(([lbl, val, cls]) =>
+    `<div class="cio-hist-stat"><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div></div>`
+  ).join("");
+
+  if (rows.length === 0){
+    listEl.innerHTML = '<div class="cio-empty">No issue reports for this device type.</div>';
+  } else {
+    // How many reports this device already had, oldest-first, so an entry can
+    // say "3rd report". Counted within what's currently shown — the project
+    // filter applies here as it does everywhere else on this tab, so the
+    // number always matches the rows you can actually see.
+    const seen = {};
+    const ordinalByReport = {};
+    rows.slice().sort((a, b) => parseCioIssueTs(a.ts) - parseCioIssueTs(b.ts)).forEach(i => {
+      const k = cioIssueDeviceKey(i);
+      if (!k) return;
+      seen[k] = (seen[k] || 0) + 1;
+      ordinalByReport[i.id || (k + i.ts)] = seen[k];
+    });
+    const ordinalLabel = n => n === 2 ? "2nd report" : n === 3 ? "3rd report" : n + "th report";
+
+    listEl.innerHTML = rows.map(i => {
+      const isOpen = cioIssueIsOpen(i);
+      const nth = ordinalByReport[i.id || (cioIssueDeviceKey(i) + i.ts)] || 1;
+      const title = [i.tag, i.deviceType].filter(Boolean).map(escapeHtmlCio).join(" — ")
+                 || escapeHtmlCio(i.serial || "(unidentified item)");
+      const line2 = [
+        i.serial ? `Serial ${escapeHtmlCio(i.serial)}` : "",
+        [i.project, i.location].filter(Boolean).map(escapeHtmlCio).join(" / "),
+        i.reportedBy ? `Reported by ${escapeHtmlCio(i.reportedBy)}` : ""
+      ].filter(Boolean).join(" · ");
+      return `
+      <div class="cio-issue-card ${isOpen ? "is-open" : "is-done"}">
+        <div class="cio-issue-head">
+          <span class="cio-issue-title">${title}
+            <span class="cio-issue-badge ${isOpen ? "is-open" : "is-done"}">${escapeHtmlCio(i.status || "—")}</span>
+            ${nth > 1 ? `<span class="cio-issue-badge is-repeat">${ordinalLabel(nth)}</span>` : ""}
+          </span>
+          <span class="cio-issue-meta" style="white-space:nowrap;">${escapeHtmlCio(i.ts || "")}</span>
+        </div>
+        ${line2 ? `<div class="cio-issue-meta">${line2}</div>` : ""}
+        ${i.description ? `<div class="cio-issue-desc">${escapeHtmlCio(i.description)}</div>` : ""}
+        ${i.resolution ? `<div class="cio-issue-res"><div class="lbl">Resolution</div><div class="txt">${escapeHtmlCio(i.resolution)}</div></div>` : ""}
+      </div>`;
+    }).join("");
+  }
+
+  bubblesEl.querySelectorAll(".cio-hist-bub").forEach(b => {
+    b.onclick = () => { cioHistoryFilter = b.getAttribute("data-hist"); renderCioIssueHistory(); };
+  });
 }
 
 // Devices handed back in Fair condition, with whatever the moderator wrote.
