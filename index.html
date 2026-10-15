@@ -108,7 +108,7 @@
      per-row view behind the same switch. Every class here is prefixed
      cio-act- so none of it can collide with the Hardware Management tab's
      own .log-* activity aside, which is a different dataset entirely. */
-  .cio-act-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:22px;}
+  .cio-act-head{display:flex;justify-content:space-between;align-items:center;gap:12px;}
   .cio-act-everything{font-size:12px;font-weight:600;color:var(--c-violet);cursor:pointer;background:none;border:0;font-family:inherit;padding:0;}
   .cio-act-everything:hover{text-decoration:underline;}
   .cio-act-everything:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;}
@@ -151,6 +151,40 @@
      leadership sees at-a-glance status regardless of which tab is open,
      without needing to click into the full Check-In/Out Activity tab. */
   .cio-mini-widget{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:14px;}
+
+  /* Collapsible sections. Native <details> so the header is a real button
+     with keyboard support for free. The open/closed state is NOT kept in the
+     DOM alone — the dashboard re-renders on every poll, so it lives in
+     cioSectionState and localStorage (see below) and the <details> wrappers
+     themselves are static markup that re-renders never replace. */
+  .cio-sec{border:1px solid var(--border);border-radius:10px;background:var(--panel);margin-bottom:12px;}
+  .cio-sec > summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;
+    padding:11px 14px;font-size:13px;font-weight:600;color:var(--ink);border-radius:10px;}
+  .cio-sec > summary::-webkit-details-marker{display:none;}
+  .cio-sec > summary:hover{background:var(--hover-bg);}
+  .cio-sec > summary:focus-visible{outline:2px solid var(--c-violet);outline-offset:-2px;}
+  .cio-sec-chev{flex:none;width:9px;height:9px;border-right:2px solid var(--sub);border-bottom:2px solid var(--sub);
+    transform:rotate(-45deg);transition:transform .15s ease;margin-left:2px;}
+  .cio-sec[open] > summary .cio-sec-chev{transform:rotate(45deg);}
+  .cio-sec-count{margin-left:auto;font-size:12px;font-weight:600;color:var(--sub);white-space:nowrap;}
+  /* Only the one count that means "act now" gets colour; if every header
+     were coloured none of them would carry a signal. */
+  .cio-sec-count.alert{color:var(--st-broken);}
+  .cio-sec-body{padding:0 14px 14px;}
+  /* The inner panels already have their own card chrome; inside a section
+     that would be a box in a box, so it's flattened here only. */
+  .cio-sec-body .cio-mini-widget{border:0;background:none;padding:0;margin-bottom:0;}
+
+  /* Moderator activity + currently-checked-out, side by side. These two
+     answer the same question, so they belong on one row; the timeline gets
+     the space because it is the one that needs width. */
+  .cio-pair{display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1fr);gap:18px;align-items:start;}
+  .cio-pair-side{min-width:0;}
+  .cio-pair-side .cio-mini-list{max-height:320px;}
+  @media (max-width:1100px){ .cio-pair{grid-template-columns:minmax(0,1fr);gap:16px;} }
+  .cio-sec-link{font-size:12px;font-weight:600;color:var(--c-violet);text-decoration:none;}
+  .cio-sec-link:hover{text-decoration:underline;}
+  .cio-sec-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px;}
   .cio-mini-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
   .cio-mini-link{border:none;background:none;color:var(--c-violet);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;padding:2px 4px;}
   .cio-mini-link:hover{text-decoration:underline;}
@@ -254,7 +288,9 @@
      to a 7 AM–12 AM window (the "Show full 24 hours" checkbox reveals
      anything outside it); a small clock badge on a name flags activity
      that's currently hidden by that window. */
-  .cio-timeline-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}
+  /* The section <summary> names this panel now, so the head carries only the
+     day nav and the 24-hour toggle, right-aligned. */
+  .cio-timeline-head{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;}
   .cio-timeline-controls{display:flex;align-items:center;gap:14px;}
   .cio-timeline-checkbox{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--sub);cursor:pointer;white-space:nowrap;}
   .cio-timeline-checkbox input{margin:0;cursor:pointer;}
@@ -690,14 +726,12 @@
 
       <div class="cio-kpis" id="cio-kpis"></div>
 
-      <div class="cio-mini-widget" id="cio-mini-widget">
-        <div class="cio-section-label" style="margin-bottom:0;">Currently checked out, by moderator</div>
-        <div class="cio-mini-list" id="cio-mini-list"></div>
-      </div>
-
+      <details class="cio-sec" id="cio-sec-activity" data-cio-sec="activity" open>
+      <summary><span class="cio-sec-chev"></span>Moderator activity<span class="cio-sec-count" data-cio-count="activity"></span></summary>
+      <div class="cio-sec-body">
+      <div class="cio-pair">
       <div class="cio-mini-widget">
         <div class="cio-timeline-head">
-          <div class="cio-section-label" style="margin-bottom:0;">Moderator activity</div>
           <div class="cio-timeline-controls">
             <label class="cio-timeline-checkbox"><input type="checkbox" id="cio-timeline-full-day"> Show full 24 hours</label>
             <div class="cio-timeline-nav">
@@ -715,30 +749,52 @@
           <span><i style="background:#16a34a;"></i>Checked back in</span>
         </div>
       </div>
-
-      <div class="cio-issues-head">
-        <div class="cio-section-label" style="margin-bottom:0;">Device issues</div>
-        <a class="cio-issues-link" id="cio-issues-link" target="_blank" rel="noopener noreferrer"
-           href="https://digitaltechedge.sharepoint.com/:x:/r/sites/Oslo_Sesame_Moderators2/_layouts/15/Doc.aspx?sourcedoc=%7B5B90E19F-9AB9-44DC-A86C-B75F6C8E6525%7D&amp;file=Device%20Issue%20Report-1.xlsx&amp;action=default&amp;mobileredirect=true&amp;wdwpf=doclib-c"
-           title="Open the Device Issue Report workbook in SharePoint">↗ Open the full Device Issue Report</a>
+      <div class="cio-pair-side" id="cio-mini-widget">
+        <div class="cio-section-label">Currently checked out, by moderator</div>
+        <div class="cio-mini-list" id="cio-mini-list"></div>
       </div>
-      <div class="cio-issues-list" id="cio-issues-list"></div>
-
-      <div class="cio-section-label" style="margin-top:22px;">Device issue history</div>
-      <div class="cio-hist-bubbles" id="cio-hist-bubbles"></div>
-      <div class="cio-hist-stats" id="cio-hist-stats"></div>
-      <div class="cio-hist-list" id="cio-hist-list"></div>
-
-      <div class="cio-act-head">
-        <div class="cio-section-label" style="margin-bottom:0;">Check-in / check-out activity</div>
-        <button type="button" class="cio-act-everything" id="cio-act-everything">Show everything</button>
       </div>
-      <div class="cio-act-switch" id="cio-act-switch">
-        <button type="button" class="cio-act-mode active" data-act-mode="grouped">Grouped</button>
-        <button type="button" class="cio-act-mode" data-act-mode="rows">All rows</button>
       </div>
-      <div class="cio-act-count" id="cio-act-count"></div>
-      <div class="cio-act-list" id="cio-act-list"></div>
+      </details>
+
+      <details class="cio-sec" id="cio-sec-issues" data-cio-sec="issues" open>
+      <summary><span class="cio-sec-chev"></span>Device issues<span class="cio-sec-count" data-cio-count="issues"></span></summary>
+      <div class="cio-sec-body">
+        <!-- The SharePoint link lives in the body rather than the summary:
+             an <a> inside a <summary> both navigates and toggles the section,
+             which is the kind of double action nobody expects. -->
+        <div class="cio-sec-toolbar">
+          <a class="cio-sec-link" id="cio-issues-link" target="_blank" rel="noopener noreferrer"
+             href="https://digitaltechedge.sharepoint.com/:x:/r/sites/Oslo_Sesame_Moderators2/_layouts/15/Doc.aspx?sourcedoc=%7B5B90E19F-9AB9-44DC-A86C-B75F6C8E6525%7D&amp;file=Device%20Issue%20Report-1.xlsx&amp;action=default&amp;mobileredirect=true&amp;wdwpf=doclib-c"
+             title="Open the Device Issue Report workbook in SharePoint">↗ Open the full Device Issue Report</a>
+        </div>
+        <div class="cio-issues-list" id="cio-issues-list"></div>
+      </div>
+      </details>
+
+      <details class="cio-sec" id="cio-sec-history" data-cio-sec="history" open>
+      <summary><span class="cio-sec-chev"></span>Device issue history<span class="cio-sec-count" data-cio-count="history"></span></summary>
+      <div class="cio-sec-body">
+        <div class="cio-hist-bubbles" id="cio-hist-bubbles"></div>
+        <div class="cio-hist-stats" id="cio-hist-stats"></div>
+        <div class="cio-hist-list" id="cio-hist-list"></div>
+      </div>
+      </details>
+
+      <details class="cio-sec" id="cio-sec-log" data-cio-sec="log" open>
+      <summary><span class="cio-sec-chev"></span>Check-in / check-out activity<span class="cio-sec-count" data-cio-count="log"></span></summary>
+      <div class="cio-sec-body">
+        <div class="cio-act-head">
+          <div class="cio-act-switch" id="cio-act-switch">
+            <button type="button" class="cio-act-mode active" data-act-mode="grouped">Grouped</button>
+            <button type="button" class="cio-act-mode" data-act-mode="rows">All rows</button>
+          </div>
+          <button type="button" class="cio-act-everything" id="cio-act-everything">Show everything</button>
+        </div>
+        <div class="cio-act-count" id="cio-act-count"></div>
+        <div class="cio-act-list" id="cio-act-list"></div>
+      </div>
+      </details>
     </div>
   </div>
 
@@ -1139,6 +1195,9 @@ const UNSAVED_KEY = "hw-tracker-unsaved-v1";
 // Log ids the user has acknowledged in the reconciliation warning, so a
 // deliberately deleted device doesn't nag forever.
 const RECON_DISMISS_KEY = "hw-tracker-recon-dismissed-v1";
+// Which Check-In/Out sections are expanded. Per-browser, like the other view
+// preferences — it says nothing about the data, so it never goes to Excel.
+const CIO_SECTIONS_KEY = "hw-tracker-cio-sections-v1";
 
 // Hardware/chip icon — replaces the old 🖥 emoji everywhere. Uses currentColor
 // so it automatically matches whatever text color surrounds it (violet when a
@@ -4785,6 +4844,14 @@ function renderCheckInOutDashboard(){
   cioSafeRender("device issues", () => renderCioIssuesPanel());
   cioSafeRender("issue history", () => renderCioIssueHistory());
   cioSafeRender("activity", () => renderCioActivity());
+  cioSafeRender("section counts", () => {
+    const n = openWithAge.length;
+    setCioSectionCount("activity", n ? `${n} checked out` : "nothing out");
+    const attention = checkInOutIssues.filter(i => cioMatchesSelectedProject(i) && cioIssueIsOpen(i)).length;
+    setCioSectionCount("issues", attention ? `${attention} need${attention === 1 ? "s" : ""} attention` : "nothing open", attention > 0);
+    const reports = cioHistoryRows(cioHistoryFilter).length;
+    setCioSectionCount("history", `${reports} report${reports === 1 ? "" : "s"}`);
+  });
   cioSafeRender("device search", () => renderCioSearchResult());
 }
 
@@ -5257,6 +5324,45 @@ function cioFairReturnsHtml(){
 }
 
 // ---------------------------------------------------------------------------
+// Collapsible sections.
+//
+// The open/closed state deliberately does NOT live in the DOM alone. This
+// dashboard re-renders on every poll, and anything held only as markup would
+// snap back open under the user every 25 seconds. It lives here, is restored
+// from localStorage on load, and the <details> wrappers are static markup
+// that re-renders never replace — only their inner containers are rewritten.
+// ---------------------------------------------------------------------------
+let cioSectionState = {};
+try { cioSectionState = JSON.parse(localStorage.getItem(CIO_SECTIONS_KEY) || "{}") || {}; }
+catch (err){ cioSectionState = {}; }
+
+function cioPersistSections(){
+  try { localStorage.setItem(CIO_SECTIONS_KEY, JSON.stringify(cioSectionState)); }
+  catch (err){ /* private mode, quota — the sections still work this session */ }
+}
+
+function initCioSections(){
+  document.querySelectorAll("[data-cio-sec]").forEach(el => {
+    const key = el.getAttribute("data-cio-sec");
+    // Absent from storage means "never touched" — everything starts expanded,
+    // so nobody loses a panel they didn't know was collapsible.
+    if (Object.prototype.hasOwnProperty.call(cioSectionState, key)) el.open = !!cioSectionState[key];
+    el.addEventListener("toggle", () => { cioSectionState[key] = el.open; cioPersistSections(); });
+  });
+}
+initCioSections();
+
+// Live counts in the headers, so a collapsed section still reports. Without
+// these, collapsing would hide whether anything needs attention, which is a
+// worse trade than the scrolling it saves.
+function setCioSectionCount(key, text, alert){
+  const el = document.querySelector(`[data-cio-count="${key}"]`);
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("alert", !!alert);
+}
+
+// ---------------------------------------------------------------------------
 // Check-in / check-out activity.
 //
 // One log row is one device, so a trip where somebody moved five devices
@@ -5448,6 +5554,8 @@ function renderCioActivity(){
     countEl.textContent = (cioActShowAll ? "All activity" : `Last ${CIO_ACT_RECENT_DAYS} days`)
       + ` · ${rows.length} device row${rows.length === 1 ? "" : "s"}`;
   }
+  setCioSectionCount("log", `${rows.length} row${rows.length === 1 ? "" : "s"}`
+    + (cioActShowAll ? "" : `, last ${CIO_ACT_RECENT_DAYS} days`));
   if (!rows.length){
     listEl.innerHTML = '<div class="cio-empty">No check-in/out activity in this period.</div>';
     return;
