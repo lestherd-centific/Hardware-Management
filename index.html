@@ -90,6 +90,19 @@
   .cio-badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--st-broken-bg);color:var(--st-broken);white-space:nowrap;}
   .cio-empty{padding:10px 0;color:var(--sub);font-size:12.5px;}
   /* Device issue history — device-type bubbles, summary tiles, full log. */
+  /* Status toggle for the Device issues section. Deliberately a segmented
+     control rather than loose pills, so it reads as a different level of
+     control from the device-type bubbles sitting right underneath it. */
+  .cio-iv-switch{display:inline-flex;border:1px solid var(--border);border-radius:999px;
+    padding:3px;gap:3px;margin-bottom:11px;background:var(--hover-bg);flex-wrap:wrap;}
+  .cio-iv-btn{border:0;background:none;color:var(--sub);font-family:inherit;font-size:12px;font-weight:600;
+    padding:5px 14px;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+  .cio-iv-btn .n{font-weight:700;opacity:.75;font-size:11px;}
+  .cio-iv-btn:hover{color:var(--ink);}
+  .cio-iv-btn.active{background:var(--panel);color:var(--c-violet);box-shadow:0 1px 2px rgba(0,0,0,.07);}
+  .cio-iv-btn.alert{color:var(--st-broken);}
+  .cio-iv-btn:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;}
+
   .cio-hist-bubbles{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px;}
   .cio-hist-bub{border:1px solid var(--border);background:var(--panel);color:var(--sub);font-family:inherit;font-size:12px;font-weight:600;padding:5px 13px;border-radius:999px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
   .cio-hist-bub:hover{color:var(--ink);}
@@ -768,16 +781,10 @@
              href="https://digitaltechedge.sharepoint.com/:x:/r/sites/Oslo_Sesame_Moderators2/_layouts/15/Doc.aspx?sourcedoc=%7B5B90E19F-9AB9-44DC-A86C-B75F6C8E6525%7D&amp;file=Device%20Issue%20Report-1.xlsx&amp;action=default&amp;mobileredirect=true&amp;wdwpf=doclib-c"
              title="Open the Device Issue Report workbook in SharePoint">↗ Open the full Device Issue Report</a>
         </div>
-        <div class="cio-issues-list" id="cio-issues-list"></div>
-      </div>
-      </details>
-
-      <details class="cio-sec" id="cio-sec-history" data-cio-sec="history" open>
-      <summary><span class="cio-sec-chev"></span>Device issue history<span class="cio-sec-count" data-cio-count="history"></span></summary>
-      <div class="cio-sec-body">
+        <div class="cio-iv-switch" id="cio-iv-switch"></div>
         <div class="cio-hist-bubbles" id="cio-hist-bubbles"></div>
         <div class="cio-hist-stats" id="cio-hist-stats"></div>
-        <div class="cio-hist-list" id="cio-hist-list"></div>
+        <div class="cio-issues-list" id="cio-issues-list"></div>
       </div>
       </details>
 
@@ -4841,16 +4848,14 @@ function renderCheckInOutDashboard(){
   // chart is gone now, but the isolation is worth keeping on its own merits.
   cioSafeRender("checked-out list", () => renderCioMiniList(openWithAge));
   cioSafeRender("moderator timeline", () => renderCioModTimeline());
-  cioSafeRender("device issues", () => renderCioIssuesPanel());
-  cioSafeRender("issue history", () => renderCioIssueHistory());
+  cioSafeRender("device issues", () => renderCioIssues());
   cioSafeRender("activity", () => renderCioActivity());
   cioSafeRender("section counts", () => {
     const n = openWithAge.length;
     setCioSectionCount("activity", n ? `${n} checked out` : "nothing out");
     const attention = checkInOutIssues.filter(i => cioMatchesSelectedProject(i) && cioIssueIsOpen(i)).length;
     setCioSectionCount("issues", attention ? `${attention} need${attention === 1 ? "s" : ""} attention` : "nothing open", attention > 0);
-    const reports = cioHistoryRows(cioHistoryFilter).length;
-    setCioSectionCount("history", `${reports} report${reports === 1 ? "" : "s"}`);
+
   });
   cioSafeRender("device search", () => renderCioSearchResult());
 }
@@ -5114,64 +5119,6 @@ function cioIssueDeviceKey(i){
 // list — a Damaged check-in files a report automatically, so the two showed
 // the same events, and this one also says whether anything was done about it.
 // Respects the Project filter, like everything else on this tab.
-function renderCioIssuesPanel(){
-  const el = document.getElementById("cio-issues-list");
-  if (!el) return;
-  // Fair returns come from the checkout log, not the issues workbook, so they
-  // must still render when the issues flow is unconfigured or has nothing.
-  const fairHtml = cioFairReturnsHtml();
-  if (!cioIssuesConfigured){
-    el.innerHTML = '<div class="cio-empty">Device issue log isn\'t configured yet.</div>' + fairHtml;
-    return;
-  }
-  const rows = checkInOutIssues.filter(cioMatchesSelectedProject);
-  if (rows.length === 0){
-    el.innerHTML = fairHtml
-      ? fairHtml
-      : '<div class="cio-empty">No device issues reported.</div>';
-    return;
-  }
-  const byRecency = (a, b) => parseCioIssueTs(b.ts) - parseCioIssueTs(a.ts);
-  const openRows = rows.filter(cioIssueIsOpen).sort(byRecency);
-  const clearedRows = rows.filter(i => !cioIssueIsOpen(i)).sort(byRecency);
-
-  const card = (i) => {
-    const isOpen = cioIssueIsOpen(i);
-    const title = [i.tag, i.deviceType].filter(Boolean).map(escapeHtmlCio).join(" — ") ||
-                  escapeHtmlCio(i.serial || "(unidentified item)");
-    const place = [i.project, i.location].filter(Boolean).map(escapeHtmlCio).join(" / ");
-    const line2 = [
-      i.serial ? `Serial ${escapeHtmlCio(i.serial)}` : "",
-      place
-    ].filter(Boolean).join(" · ");
-    const line3 = [
-      i.reportedBy ? `Reported by ${escapeHtmlCio(i.reportedBy)}` : "",
-      i.ts ? escapeHtmlCio(i.ts) : "",
-      i.context ? escapeHtmlCio(i.context) : ""
-    ].filter(Boolean).join(" · ");
-    return `
-    <div class="cio-issue-card ${isOpen ? "is-open" : ""}">
-      <div class="cio-issue-head">
-        <span class="cio-issue-title">${title}</span>
-        <span class="cio-issue-badge ${isOpen ? "is-open" : ""}">${escapeHtmlCio(i.status || "—")}</span>
-      </div>
-      ${line2 ? `<div class="cio-issue-meta">${line2}</div>` : ""}
-      ${line3 ? `<div class="cio-issue-meta">${line3}</div>` : ""}
-      ${i.description ? `<div class="cio-issue-desc">${escapeHtmlCio(i.description)}</div>` : ""}
-      ${i.resolution ? `<div class="cio-issue-res"><div class="lbl">Resolution</div><div class="txt">${escapeHtmlCio(i.resolution)}</div></div>` : ""}
-    </div>`;
-  };
-
-  let html = "";
-  if (openRows.length){
-    html += `<div class="cio-issues-group">Needs attention · ${openRows.length}</div>` + openRows.map(card).join("");
-  }
-  html += cioFairReturnsHtml();
-  if (clearedRows.length){
-    html += `<div class="cio-issues-group">Cleared · ${clearedRows.length}</div>` + clearedRows.map(card).join("");
-  }
-  el.innerHTML = html;
-}
 
 // ---------------------------------------------------------------------------
 // Device issue history
@@ -5191,6 +5138,13 @@ const CIO_HISTORY_CATEGORIES = [
   { key: "mic",     label: "Mic",      match: t => t.includes("mic") }
 ];
 let cioHistoryFilter = "all";
+// Which of the three lists the Device issues section shows.
+//   "open" — needs attention (the default: what to act on)
+//   "all"  — every report, chronological, the documented history
+//   "fair" — devices handed back in Fair condition. Checkout-log data, not
+//            issue reports, which is why it gets its own list rather than
+//            being mixed into the other two.
+let cioIssueView = "open";
 
 function cioHistoryRows(categoryKey){
   const cat = CIO_HISTORY_CATEGORIES.find(c => c.key === categoryKey) || CIO_HISTORY_CATEGORIES[0];
@@ -5202,80 +5156,6 @@ function cioHistoryRows(categoryKey){
 // Resolved and Replaced both mean the device is back in circulation.
 function cioIssueIsClosed(i){ return !cioIssueIsOpen(i); }
 
-function renderCioIssueHistory(){
-  const bubblesEl = document.getElementById("cio-hist-bubbles");
-  const statsEl = document.getElementById("cio-hist-stats");
-  const listEl = document.getElementById("cio-hist-list");
-  if (!bubblesEl || !statsEl || !listEl) return;
-
-  bubblesEl.innerHTML = CIO_HISTORY_CATEGORIES.map(c => {
-    const n = cioHistoryRows(c.key).length;
-    return `<button type="button" class="cio-hist-bub ${c.key === cioHistoryFilter ? "active" : ""}" data-hist="${c.key}">`
-         + `${escapeHtmlCio(c.label)} <span class="n">${n}</span></button>`;
-  }).join("");
-
-  const rows = cioHistoryRows(cioHistoryFilter)
-    .slice()
-    .sort((a, b) => parseCioIssueTs(b.ts) - parseCioIssueTs(a.ts));
-
-  const openCount = rows.filter(cioIssueIsOpen).length;
-  const devices = new Set(rows.map(cioIssueDeviceKey).filter(Boolean));
-  statsEl.innerHTML = [
-    ["Reports", String(rows.length), ""],
-    ["Still open", String(openCount), openCount ? "danger" : ""],
-    ["Resolved", String(rows.length - openCount), rows.length - openCount ? "ok" : ""],
-    ["Devices affected", String(devices.size), ""]
-  ].map(([lbl, val, cls]) =>
-    `<div class="cio-hist-stat"><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div></div>`
-  ).join("");
-
-  if (rows.length === 0){
-    listEl.innerHTML = '<div class="cio-empty">No issue reports for this device type.</div>';
-  } else {
-    // How many reports this device already had, oldest-first, so an entry can
-    // say "3rd report". Counted within what's currently shown — the project
-    // filter applies here as it does everywhere else on this tab, so the
-    // number always matches the rows you can actually see.
-    const seen = {};
-    const ordinalByReport = {};
-    rows.slice().sort((a, b) => parseCioIssueTs(a.ts) - parseCioIssueTs(b.ts)).forEach(i => {
-      const k = cioIssueDeviceKey(i);
-      if (!k) return;
-      seen[k] = (seen[k] || 0) + 1;
-      ordinalByReport[i.id || (k + i.ts)] = seen[k];
-    });
-    const ordinalLabel = n => n === 2 ? "2nd report" : n === 3 ? "3rd report" : n + "th report";
-
-    listEl.innerHTML = rows.map(i => {
-      const isOpen = cioIssueIsOpen(i);
-      const nth = ordinalByReport[i.id || (cioIssueDeviceKey(i) + i.ts)] || 1;
-      const title = [i.tag, i.deviceType].filter(Boolean).map(escapeHtmlCio).join(" — ")
-                 || escapeHtmlCio(i.serial || "(unidentified item)");
-      const line2 = [
-        i.serial ? `Serial ${escapeHtmlCio(i.serial)}` : "",
-        [i.project, i.location].filter(Boolean).map(escapeHtmlCio).join(" / "),
-        i.reportedBy ? `Reported by ${escapeHtmlCio(i.reportedBy)}` : ""
-      ].filter(Boolean).join(" · ");
-      return `
-      <div class="cio-issue-card ${isOpen ? "is-open" : "is-done"}">
-        <div class="cio-issue-head">
-          <span class="cio-issue-title">${title}
-            <span class="cio-issue-badge ${isOpen ? "is-open" : "is-done"}">${escapeHtmlCio(i.status || "—")}</span>
-            ${nth > 1 ? `<span class="cio-issue-badge is-repeat">${ordinalLabel(nth)}</span>` : ""}
-          </span>
-          <span class="cio-issue-meta" style="white-space:nowrap;">${escapeHtmlCio(i.ts || "")}</span>
-        </div>
-        ${line2 ? `<div class="cio-issue-meta">${line2}</div>` : ""}
-        ${i.description ? `<div class="cio-issue-desc">${escapeHtmlCio(i.description)}</div>` : ""}
-        ${i.resolution ? `<div class="cio-issue-res"><div class="lbl">Resolution</div><div class="txt">${escapeHtmlCio(i.resolution)}</div></div>` : ""}
-      </div>`;
-    }).join("");
-  }
-
-  bubblesEl.querySelectorAll(".cio-hist-bub").forEach(b => {
-    b.onclick = () => { cioHistoryFilter = b.getAttribute("data-hist"); renderCioIssueHistory(); };
-  });
-}
 
 // Devices handed back in Fair condition, with whatever the moderator wrote.
 // These are NOT filed reports — no status, no owner, no resolution — so they
@@ -5293,7 +5173,7 @@ function cioFairReturns(){
     .sort((a, b) => (parseCioTs(b.ts)?.getTime() || 0) - (parseCioTs(a.ts)?.getTime() || 0));
 }
 
-function cioFairReturnsHtml(){
+function cioFairReturnsHtml(withHeader){
   const fair = cioFairReturns();
   if (!fair.length) return "";
   const card = (e) => {
@@ -5320,7 +5200,10 @@ function cioFairReturnsHtml(){
         : `<div class="cio-issue-desc" style="color:var(--sub);font-style:italic;">No reason given.</div>`}
     </div>`;
   };
-  return `<div class="cio-issues-group">Returned Fair · ${fair.length}</div>` + fair.map(card).join("");
+  // The header is opt-in now: in the merged section the "Returned Fair" pill
+  // already carries the label and the count.
+  return (withHeader ? `<div class="cio-issues-group">Returned Fair · ${fair.length}</div>` : "")
+       + fair.map(card).join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -5592,6 +5475,124 @@ if (cioActSwitchEl){
 const cioActEveryEl = document.getElementById("cio-act-everything");
 if (cioActEveryEl){
   cioActEveryEl.addEventListener("click", () => { cioActShowAll = !cioActShowAll; renderCioActivity(); });
+}
+
+function renderCioIssues(){
+  const switchEl  = document.getElementById("cio-iv-switch");
+  const bubblesEl = document.getElementById("cio-hist-bubbles");
+  const statsEl   = document.getElementById("cio-hist-stats");
+  const listEl    = document.getElementById("cio-issues-list");
+  if (!switchEl || !bubblesEl || !statsEl || !listEl) return;
+
+  // Every report matching BOTH the project filter and the device-type bubble.
+  // The tiles and the repeat ordinals are computed over this set, never over
+  // whatever the status toggle happens to be showing: a laptop with two
+  // resolved reports and one open one must still say "3rd report" in the
+  // needs-attention view, which is precisely where that matters. It also
+  // keeps the tiles steady as you flip between the two report views, so the
+  // numbers describe the device type rather than the toggle.
+  const all = cioHistoryRows(cioHistoryFilter)
+    .slice().sort((a, b) => parseCioIssueTs(b.ts) - parseCioIssueTs(a.ts));
+  const openRows = all.filter(cioIssueIsOpen);
+  // Fair returns come from the checkout log, not the issues workbook, so they
+  // survive the issues flow being unconfigured or empty.
+  const fairCount = cioFairReturns().length;
+  const isFair = cioIssueView === "fair";
+
+  switchEl.innerHTML = [
+    ["open", "Needs attention", openRows.length, openRows.length > 0],
+    ["all",  "All reports",     all.length,      false],
+    ["fair", "Returned Fair",   fairCount,       false]
+  ].map(([k, label, n, alert]) =>
+    `<button type="button" class="cio-iv-btn ${k === cioIssueView ? "active" : ""}${alert ? " alert" : ""}" data-iv="${k}">`
+    + `${escapeHtmlCio(label)} <span class="n">${n}</span></button>`).join("");
+  switchEl.querySelectorAll(".cio-iv-btn").forEach(b => {
+    b.onclick = () => { cioIssueView = b.getAttribute("data-iv"); renderCioIssues(); };
+  });
+
+  // Both describe issue REPORTS. A Fair return has no status and no report
+  // history, so they are hidden for it rather than shown reading zero.
+  const showReportChrome = !isFair && cioIssuesConfigured;
+  bubblesEl.style.display = showReportChrome ? "" : "none";
+  statsEl.style.display   = showReportChrome ? "" : "none";
+
+  if (showReportChrome){
+    bubblesEl.innerHTML = CIO_HISTORY_CATEGORIES.map(c => {
+      const n = cioHistoryRows(c.key).length;
+      return `<button type="button" class="cio-hist-bub ${c.key === cioHistoryFilter ? "active" : ""}" data-hist="${c.key}">`
+           + `${escapeHtmlCio(c.label)} <span class="n">${n}</span></button>`;
+    }).join("");
+    bubblesEl.querySelectorAll(".cio-hist-bub").forEach(b => {
+      b.onclick = () => { cioHistoryFilter = b.getAttribute("data-hist"); renderCioIssues(); };
+    });
+
+    const devices = new Set(all.map(cioIssueDeviceKey).filter(Boolean));
+    statsEl.innerHTML = [
+      ["Reports", String(all.length), ""],
+      ["Still open", String(openRows.length), openRows.length ? "danger" : ""],
+      ["Resolved", String(all.length - openRows.length), all.length - openRows.length ? "ok" : ""],
+      ["Devices affected", String(devices.size), ""]
+    ].map(([lbl, val, cls]) =>
+      `<div class="cio-hist-stat"><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div></div>`
+    ).join("");
+  }
+
+  if (isFair){
+    listEl.innerHTML = cioFairReturnsHtml()
+      || '<div class="cio-empty">No devices returned Fair in the current log.</div>';
+    return;
+  }
+  if (!cioIssuesConfigured){
+    listEl.innerHTML = '<div class="cio-empty">Device issue log isn\'t configured yet.</div>';
+    return;
+  }
+
+  // How many reports this device already had, oldest-first, so an entry can
+  // say "3rd report". Counted within what the filters currently allow, so the
+  // number always matches rows you could actually scroll to.
+  const seen = {};
+  const ordinalByReport = {};
+  all.slice().sort((a, b) => parseCioIssueTs(a.ts) - parseCioIssueTs(b.ts)).forEach(i => {
+    const k = cioIssueDeviceKey(i);
+    if (!k) return;
+    seen[k] = (seen[k] || 0) + 1;
+    ordinalByReport[i.id || (k + i.ts)] = seen[k];
+  });
+  const ordinalLabel = n => n === 2 ? "2nd report" : n === 3 ? "3rd report" : n + "th report";
+
+  const rows = cioIssueView === "open" ? openRows : all;
+  if (rows.length === 0){
+    listEl.innerHTML = cioIssueView === "open"
+      ? '<div class="cio-empty">Nothing needs attention right now.</div>'
+      : '<div class="cio-empty">No issue reports for this device type.</div>';
+    return;
+  }
+
+  listEl.innerHTML = rows.map(i => {
+    const isOpen = cioIssueIsOpen(i);
+    const nth = ordinalByReport[i.id || (cioIssueDeviceKey(i) + i.ts)] || 1;
+    const title = [i.tag, i.deviceType].filter(Boolean).map(escapeHtmlCio).join(" — ")
+               || escapeHtmlCio(i.serial || "(unidentified item)");
+    const line2 = [
+      i.serial ? `Serial ${escapeHtmlCio(i.serial)}` : "",
+      [i.project, i.location].filter(Boolean).map(escapeHtmlCio).join(" / "),
+      i.reportedBy ? `Reported by ${escapeHtmlCio(i.reportedBy)}` : "",
+      i.context ? escapeHtmlCio(i.context) : ""
+    ].filter(Boolean).join(" · ");
+    return `
+    <div class="cio-issue-card ${isOpen ? "is-open" : "is-done"}">
+      <div class="cio-issue-head">
+        <span class="cio-issue-title">${title}
+          <span class="cio-issue-badge ${isOpen ? "is-open" : "is-done"}">${escapeHtmlCio(i.status || "—")}</span>
+          ${nth > 1 ? `<span class="cio-issue-badge is-repeat">${ordinalLabel(nth)}</span>` : ""}
+        </span>
+        <span class="cio-issue-meta" style="white-space:nowrap;">${escapeHtmlCio(i.ts || "")}</span>
+      </div>
+      ${line2 ? `<div class="cio-issue-meta">${line2}</div>` : ""}
+      ${i.description ? `<div class="cio-issue-desc">${escapeHtmlCio(i.description)}</div>` : ""}
+      ${i.resolution ? `<div class="cio-issue-res"><div class="lbl">Resolution</div><div class="txt">${escapeHtmlCio(i.resolution)}</div></div>` : ""}
+    </div>`;
+  }).join("");
 }
 
 // A per-moderator, per-day timeline: a dot lands at the exact moment that
