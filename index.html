@@ -112,9 +112,17 @@
   /* Top-level page tabs: Inventory vs. Check-In/Out Activity. Distinct from
      the "Availability by model" sub-tabs (Hardware/Accessories/Props),
      which are multi-select and live inside the Inventory tab. */
-  .page-tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0;}
-  .page-tab-btn{padding:9px 16px;border-radius:8px 8px 0 0;font-size:13px;}
-  .page-tab-btn.active{border-bottom:2px solid var(--c-violet);}
+  /* Segmented pill navigation. Follows the theme rather than being fixed
+     dark, so it works in both light and dark mode. */
+  .page-nav{display:inline-flex;align-items:center;gap:2px;background:var(--hover-bg);border:1px solid var(--border);border-radius:999px;padding:4px;margin-bottom:16px;flex-wrap:wrap;}
+  .page-nav-btn{border:none;background:none;font-family:inherit;font-size:13px;font-weight:600;color:var(--sub);cursor:pointer;padding:8px 18px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;text-decoration:none;transition:background .12s,color .12s;}
+  .page-nav-btn:hover{color:var(--ink);}
+  .page-nav-btn.active{background:var(--c-violet-soft);color:var(--c-violet);}
+  .page-nav-btn:focus-visible{outline:2px solid var(--c-violet);outline-offset:2px;}
+  /* Divider before the external link — a visual cue that the last item
+     leaves the app rather than switching a section. */
+  .page-nav-sep{width:1px;align-self:stretch;background:var(--border);margin:3px 6px;}
+  .page-nav-ext{font-size:11px;opacity:.75;}
 
   /* Grouped-by-moderator disclosure rows, shared shape for both the full
      Check-In/Out tab list (.cio-row-group / .cio-subrow) and the pinned
@@ -510,7 +518,6 @@
     <button id="exportBtn">Export JSON</button>
     <button id="importBtn">Import JSON</button>
     <input type="file" id="importFile" accept="application/json" style="display:none">
-    <button id="fedexTrackerBtn" title="Open the FedEx Label Tracker in a new tab">📦 FedEx Tracker</button>
     <button id="themeToggle" title="Toggle dark mode">🌙 Dark</button>
   </div>
 </header>
@@ -518,10 +525,15 @@
 <main>
 <div class="unsaved-banner" id="unsavedBanner"></div>
 
-  <div class="page-tabs" id="page-tabs">
-    <button class="tab-btn page-tab-btn active" data-page-tab="inventory">📋 Inventory</button>
-    <button class="tab-btn page-tab-btn" data-page-tab="checkinout">🔁 Check-In/Out Activity</button>
-  </div>
+  <nav class="page-nav" id="page-tabs" aria-label="Sections">
+    <button class="page-nav-btn active" type="button" data-page-tab="inventory">Hardware Management</button>
+    <button class="page-nav-btn" type="button" data-page-tab="checkinout">Check In/Out</button>
+    <span class="page-nav-sep" aria-hidden="true"></span>
+    <a class="page-nav-btn" id="fedexTrackerBtn"
+       href="https://lestherd-centific.github.io/fedexLabel_tracker/"
+       target="_blank" rel="noopener noreferrer"
+       title="Opens the FedEx Label Tracker in a new tab">FedEx Tracker <span class="page-nav-ext" aria-hidden="true">↗</span></a>
+  </nav>
 
   <div class="page-section" id="page-section-inventory" data-page-section="inventory">
 
@@ -4461,10 +4473,6 @@ document.getElementById("qm-move-btn").addEventListener("click", () => {
 // Separate site (own repo, own tracking) for FedEx shipping labels — this is
 // just a convenience shortcut to open it, not an integration; HW Tracker
 // never reads from or writes to it.
-document.getElementById("fedexTrackerBtn").addEventListener("click", () => {
-  window.open("https://lestherd-centific.github.io/fedexLabel_tracker/", "_blank", "noopener,noreferrer");
-});
-
 const THEME_KEY = "hw-tracker-theme";
 function applyTheme(theme){
   document.documentElement.setAttribute("data-theme", theme);
@@ -4483,11 +4491,13 @@ document.getElementById("themeToggle").addEventListener("click", () => {
 // Top-level page tabs (Inventory / Check-In-Out Activity) — a plain
 // single-select switcher, distinct from the multi-select Hardware/
 // Accessories/Props sub-tabs inside the Inventory tab.
-document.querySelectorAll("#page-tabs .page-tab-btn").forEach(btn => {
+// [data-page-tab] deliberately excludes the FedEx link — it has no section
+// to switch to, it leaves the app.
+document.querySelectorAll("#page-tabs [data-page-tab]").forEach(btn => {
   btn.addEventListener("click", () => switchPageTab(btn.getAttribute("data-page-tab")));
 });
 function switchPageTab(tab){
-  document.querySelectorAll("#page-tabs .page-tab-btn").forEach(btn => {
+  document.querySelectorAll("#page-tabs [data-page-tab]").forEach(btn => {
     btn.classList.toggle("active", btn.getAttribute("data-page-tab") === tab);
   });
   document.querySelectorAll(".page-section").forEach(sec => {
