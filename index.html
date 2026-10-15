@@ -13,7 +13,7 @@
     --st-instock:#2563eb; --st-instock-bg:#e7edfd;
     --st-inuse:#16a34a; --st-inuse-bg:#e6f7ec;
     --st-broken:#dc2626; --st-broken-bg:#fdeaea;
-    --cond-fair:#d97706; --cond-fair-bg:#fdf3e0;
+    --cond-fair:#a16207; --cond-fair-bg:#fef3c7; --cond-fair-line:#eab308;
     --drop-green:#16a34a; --drop-green-bg:rgba(22,163,74,.06); --drop-green-bg-active:rgba(22,163,74,.16);
   }
   html[data-theme="dark"]{
@@ -23,7 +23,7 @@
     --st-instock:#7aa8fb; --st-instock-bg:#1c2745;
     --st-inuse:#5fdb95; --st-inuse-bg:#183226;
     --st-broken:#f9847c; --st-broken-bg:#3c2020;
-    --cond-fair:#f0b429; --cond-fair-bg:#3a2a12;
+    --cond-fair:#fde047; --cond-fair-bg:#3a2a12; --cond-fair-line:#eab308;
     --drop-green:#5fdb95; --drop-green-bg:rgba(95,219,149,.1); --drop-green-bg-active:rgba(95,219,149,.22);
   }
   *{box-sizing:border-box;}
@@ -281,8 +281,8 @@
   .cio-issues-group:first-child{margin-top:0;}
   .cio-issue-card{border:1px solid var(--border);border-left:3px solid var(--sub);border-radius:8px;padding:10px 12px;margin-bottom:8px;}
   .cio-issue-card.is-open{border-left-color:var(--st-broken);}
-  .cio-issue-card.is-fair{border-left-color:#d97706;}
-  .cio-issue-badge.is-fair{background:rgba(217,119,6,.14);color:#b45309;}
+  .cio-issue-card.is-fair{border-left-color:var(--cond-fair-line);}
+  .cio-issue-badge.is-fair{background:var(--cond-fair-bg);color:var(--cond-fair);}
   .cio-issue-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
   .cio-issue-title{font-size:12.5px;font-weight:700;}
   .cio-issue-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--hover-bg);color:var(--sub);}
