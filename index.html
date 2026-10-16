@@ -253,6 +253,8 @@
   .cio-mini-list summary .cio-name .sub{color:var(--sub);font-weight:400;}
   .cio-mini-list summary .cio-age{font-size:12px;color:var(--sub);white-space:nowrap;}
   .cio-mini-list summary .cio-age.overdue{color:var(--st-broken);font-weight:700;}
+  .cio-partial-tag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;white-space:nowrap;
+    background:var(--cond-fair-bg);color:var(--cond-fair);margin-left:6px;}
   .cio-mini-group-body{margin-top:6px;padding-left:16px;}
   .cio-mini-subrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;font-size:12px;color:var(--sub);border-bottom:1px dashed var(--border);}
   .cio-mini-subrow:last-child{border-bottom:none;}
@@ -334,6 +336,10 @@
   .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;}
   .cio-timeline-dot.yellow{background:#d97706;}
   .cio-timeline-dot.green{background:#16a34a;}
+  /* Partly returned: literally half the dot. Left half is the checked-out
+     colour, right half the checked-in colour, so it reads as "some of this
+     batch came back" without adding a third hue to the legend. */
+  .cio-timeline-dot.partial{background:linear-gradient(90deg,#d97706 0 50%,#16a34a 50% 100%);}
   .cio-timeline-dot:hover{z-index:6;}
   /* Lives on <body>, not inside .cio-timeline-list — a scroll container clips
      its own overflow, which would have hidden a tooltip on whichever row is
@@ -760,6 +766,7 @@
           <span><i class="base" style="background:var(--sub);"></i>No equipment out</span>
           <span><i style="background:#d97706;"></i>Checked out (hover a dot for the time)</span>
           <span><i style="background:#16a34a;"></i>Checked back in</span>
+          <span><i style="background:linear-gradient(90deg,#d97706 0 50%,#16a34a 50% 100%);"></i>Partly returned — rest of the batch still out</span>
         </div>
       </div>
       <div class="cio-pair-side" id="cio-mini-widget">
@@ -4718,6 +4725,80 @@ function parseCioTs(ts){
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Every checkout/checkin pair in the log, keyed by checkoutId, keeping the
+// EARLIEST row of each type — a device checked in twice keeps the real
+// return. The timeline, the partial-return marks and the mini list all read
+// this one map, so they cannot disagree about whether something came back.
+function cioSessionMap(){
+  const sessions = {};
+  checkInOutLog.forEach(e => {
+    const t = parseCioTs(e.ts);
+    if (!t) return;
+    const k = e.checkoutId || e.id;
+    if (!k) return;
+    const sess = sessions[k] || (sessions[k] = { key: k, out: null, outMs: 0, back: null, backMs: 0 });
+    const ms = t.getTime();
+    if (e.eventType === "checkout"){
+      if (!sess.out || ms < sess.outMs){ sess.out = e; sess.outMs = ms; }
+    } else if (e.eventType === "checkin"){
+      if (!sess.back || ms < sess.backMs){ sess.back = e; sess.backMs = ms; }
+    }
+  });
+  return sessions;
+}
+
+// A "trip" is the batch of devices that went out together. Deliberately the
+// SAME batching the Grouped activity view uses (same pair, same place, each
+// row within 5 minutes of the previous one) so the app has one definition of
+// a batch rather than two that drift apart.
+//
+// Returns checkoutId -> { ids, size }. A trip of one can never be partial,
+// which is what stops solo gear raising a false flag.
+function cioTripIndex(){
+  const checkouts = checkInOutLog
+    .filter(cioMatchesSelectedProject)
+    .filter(r => r.eventType === "checkout")
+    .slice().sort((a, b) => (b._row || 0) - (a._row || 0));
+  const index = {};
+  cioActGroups(checkouts).forEach(g => {
+    const ids = g.rows.map(r => r.checkoutId || r.id).filter(Boolean);
+    const trip = { ids, size: ids.length };
+    ids.forEach(id => { index[id] = trip; });
+  });
+  return index;
+}
+
+// How many of a trip's devices were back by a given moment. Passing
+// Infinity asks "how many are back now".
+function cioTripReturnedBy(trip, sessions, atMs){
+  if (!trip) return 0;
+  let n = 0;
+  trip.ids.forEach(id => {
+    const sess = sessions[id];
+    if (sess && sess.back && sess.backMs <= atMs) n++;
+  });
+  return n;
+}
+
+// Returns arrive in batches too: three devices handed back together are ONE
+// return, not three. Each row still lands a second or two apart, so judging
+// each row at its own instant would mark the first two of a clean batch as
+// partial purely because of typing speed. This maps every checkin to the
+// moment its whole return batch finished, and partial-ness is judged there.
+function cioReturnBatchEnd(){
+  const checkins = checkInOutLog
+    .filter(cioMatchesSelectedProject)
+    .filter(r => r.eventType === "checkin")
+    .slice().sort((a, b) => (b._row || 0) - (a._row || 0));
+  const endByKey = {};
+  cioActGroups(checkins).forEach(g => {
+    let end = 0;
+    g.rows.forEach(r => { const ms = cioActMs(r); if (ms !== null && ms > end) end = ms; });
+    g.rows.forEach(r => { const k = r.checkoutId || r.id; if (k && end) endByKey[k] = end; });
+  });
+  return endByKey;
+}
+
 function cioOpenCheckouts(){
   const byId = {};
   checkInOutLog.forEach(e => {
@@ -5664,21 +5745,11 @@ function renderCioModTimeline(){
   // out. And because it was a bare count rather than a per-session fact, an
   // unrelated return could cancel a genuinely open checkout and hide it.
   // Resolving each session independently fixes both.
-  const sessions = {};
-  checkInOutLog.forEach(e => {
-    const t = parseCioTs(e.ts);
-    if (!t) return;
-    const k = e.checkoutId || e.id;
-    if (!k) return;
-    const s = sessions[k] || (sessions[k] = { out: null, outMs: 0, back: null, backMs: 0 });
-    const ms = t.getTime();
-    if (e.eventType === "checkout"){
-      if (!s.out || ms < s.outMs){ s.out = e; s.outMs = ms; }
-    } else if (e.eventType === "checkin"){
-      // A device checked in twice keeps the EARLIEST return — the real one.
-      if (!s.back || ms < s.backMs){ s.back = e; s.backMs = ms; }
-    }
-  });
+  const sessions = cioSessionMap();
+  // Which batch each checkout belongs to, so a return can say whether it
+  // finished the trip or left part of it behind.
+  const trips = cioTripIndex();
+  const returnEnds = cioReturnBatchEnd();
 
   // Everyone named on a row — the pair share one row, so both names count.
   const rowNames = (e) => {
@@ -5720,6 +5791,16 @@ function renderCioModTimeline(){
       // whoever typed it in — otherwise a moderator whose kit a colleague
       // returned keeps a checkout dot with nothing closing it, which is the
       // phantom "still out" this whole block exists to avoid.
+      // Did this return finish the batch it belonged to, or leave part of it
+      // behind? Evaluated AT THE MOMENT of the return, not now — that is what
+      // makes a split return readable left to right: the devices that came
+      // back early are marked partial, and the ones that close the trip go
+      // green. A trip that never completes simply never gets a green dot.
+      const trip = trips[s.key];
+      // Judged at the end of the RETURN BATCH, not at this one row's instant.
+      const judgeAt = returnEnds[s.key] || s.backMs;
+      const backByThen = cioTripReturnedBy(trip, sessions, judgeAt);
+      const isPartial = !!trip && trip.size > 1 && backByThen < trip.size;
       const seen = new Set();
       [].concat(backNames, outNames).forEach(n => {
         const key = String(n || "").trim().toLowerCase();
@@ -5729,7 +5810,8 @@ function renderCioModTimeline(){
         if (!m) return;
         const byOther = !backNames.some(b => b.toLowerCase() === key);
         m.events.push({ ms: s.backMs, type: "checkin", row: s.back,
-                        returnedBy: byOther ? String(s.back.modName || "").trim() : "" });
+                        returnedBy: byOther ? String(s.back.modName || "").trim() : "",
+                        partial: isPartial, tripSize: trip ? trip.size : 0, tripBack: backByThen });
       });
     }
   });
@@ -5797,11 +5879,22 @@ function renderCioModTimeline(){
       const axisFrac = (rawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
       if (axisFrac < 0 || axisFrac > 1){ hasOffWindow = true; return; }
       const withName = otherName(ev.row, name);
-      const label = ev.type === "checkout"
-        ? `Checked out ${timeFmt(ev.row.ts)}${withName ? ` (with ${withName})` : ""}`
-        : `Checked back in ${timeFmt(ev.row.ts)}`
+      let label;
+      let color;
+      if (ev.type === "checkout"){
+        label = `Checked out ${timeFmt(ev.row.ts)}${withName ? ` (with ${withName})` : ""}`;
+        color = "yellow";
+      } else {
+        label = `Checked back in ${timeFmt(ev.row.ts)}`
           + (ev.returnedBy ? ` by ${ev.returnedBy}` : (withName ? ` (with ${withName})` : ""));
-      dots.push({ frac: axisFrac, color: ev.type === "checkout" ? "yellow" : "green", label });
+        if (ev.partial){
+          label += ` — ${ev.tripBack} of ${ev.tripSize} returned, ${ev.tripSize - ev.tripBack} still out`;
+        } else if (ev.tripSize > 1){
+          label += ` — completes the batch of ${ev.tripSize}`;
+        }
+        color = ev.partial ? "partial" : "green";
+      }
+      dots.push({ frac: axisFrac, color, label });
     });
     return { name, dots, hasOffWindow };
   });
@@ -5847,13 +5940,37 @@ function renderCioMiniList(openWithAge){
     return;
   }
   const groups = groupOpenByMod(openWithAge);
+  // Partly-returned batches: "2 of 5 still out" says far more when chasing
+  // gear than a bare "2". Read from the same trip index the timeline marks
+  // its half dots with, so the two can never disagree.
+  const trips = cioTripIndex();
+  const sessions = cioSessionMap();
+  const tripOf = (c) => trips[c.checkoutId || c.id];
+  // How many of a trip are STILL out, now.
+  const stillOut = (trip) => trip ? trip.size - cioTripReturnedBy(trip, sessions, Infinity) : 0;
+  const partialNote = (trip) => {
+    if (!trip || trip.size < 2) return "";
+    const out = stillOut(trip);
+    // Only worth saying once some of the batch is actually back.
+    if (out === 0 || out === trip.size) return "";
+    return `${out} of ${trip.size} still out`;
+  };
+
   el.innerHTML = groups.map(g => {
     const headAge = cioAgeLabel(g.maxMs);
+    // A pair can have gear out from more than one trip. When the whole group
+    // is one trip the note belongs on the heading; when it spans several,
+    // one heading number would be wrong, so each row carries its own.
+    const groupTrips = new Set(g.items.map(c => { const t = tripOf(c); return t ? t.ids.join("|") : "?"; }));
+    const oneTrip = groupTrips.size === 1 ? tripOf(g.items[0]) : null;
+    const headNote = oneTrip ? partialNote(oneTrip) : "";
+
     const rows = g.items.map(c => {
       const ageLabel = cioAgeLabel(c.ms);
+      const rowNote = headNote ? "" : partialNote(tripOf(c));
       return `
       <div class="cio-mini-subrow">
-        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span></span>
+        <span class="model">${escapeHtmlCio(c.model)} <span class="sub">· ${escapeHtmlCio(c.tag)}</span>${rowNote ? `<span class="cio-partial-tag">${rowNote}</span>` : ""}</span>
         <span>${escapeHtmlCio(c.project)} / ${escapeHtmlCio(c.location)}</span>
         <span class="${c.overdue ? "overdue" : ""}">${ageLabel}${c.overdue ? " · overdue" : ""}</span>
       </div>`;
@@ -5861,7 +5978,7 @@ function renderCioMiniList(openWithAge){
     return `
     <details class="cio-mini-group">
       <summary>
-        <span class="cio-name">${escapeHtmlCio(g.modName)} <span class="sub">(${g.count})</span></span>
+        <span class="cio-name">${escapeHtmlCio(g.modName)} <span class="sub">(${g.count})</span>${headNote ? `<span class="cio-partial-tag">${headNote}</span>` : ""}</span>
         <span class="cio-age ${g.overdue ? "overdue" : ""}">${headAge}${g.overdue ? " · overdue" : ""}</span>
       </summary>
       <div class="cio-mini-group-body">${rows}</div>
