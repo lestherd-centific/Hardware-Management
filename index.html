@@ -2387,7 +2387,7 @@ async function doPushToExcel(){
       // here risked pulling back a still-stale (pre-save) snapshot and
       // silently reverting the very edit that was just made, which is what
       // was happening during a fast run of consecutive status changes. The
-      // regular 25s / refocus refresh will pick up anything Excel-side once
+      // regular 60s / refocus refresh will pick up anything Excel-side once
       // it's actually caught up.
       prevLoadSnapshot = lastLoadSnapshot;
       lastLoadSnapshot = computeFleetFingerprint({
@@ -2451,7 +2451,7 @@ function autoRefreshIfSafe(){
   if (pushTimer || saveInFlight || saveQueued || conflictBlocked) return;
   loadFromExcel();
 }
-setInterval(autoRefreshIfSafe, 25000);
+setInterval(autoRefreshIfSafe, 60000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") autoRefreshIfSafe();
 });
