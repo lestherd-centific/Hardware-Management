@@ -297,21 +297,21 @@
 
   /* Moderator activity timeline — one row per moderator, x-axis is time of
      day for whichever day is selected via the ‹/› day-picker. A thin grey
-     baseline runs the length of the row. One batch is one dot (yellow out,
-     green in) with the item count drawn inside it; a single item stays a
-     plain dot. A batch written with one shared checkoutId groups on that id.
-     Older rows, one checkoutId per device, still group on the same clock
-     minute. Hover names
-     the time and the count, click lists every item. Two batches closer than
-     a dot-width — a checkout and the check-in a minute later — are eased
-     apart along the line so both stay visible; the tooltip still names the
-     real time. Defaults to a 7 AM–12 AM window (the "Show full 24 hours"
-     checkbox reveals anything outside it); a small clock badge on a name
-     flags activity that's currently hidden by that window. Gear that was
-     already out at midnight keeps the pinned start-of-day dot, drawn with a
-     red ring (and a small "overnight" label) so it isn't just another
-     checkout; the return that closes that loan gets the same ring, on the
-     whole batch dot if any item in it was overnight. */
+     baseline runs the length of the row. One numbered dot per run of the
+     same action: a later checkout or check-in joins that run when it falls
+     within ten minutes of the previous event in it. Shared checkoutIds and
+     older one-id-per-device rows follow that same rule. A single item stays
+     a plain dot, and the dot sits on the earliest scan. Hover names the
+     count and the time range; click lists every item at its own time. Two
+     dots closer than a dot-width — a checkout and the check-in a minute
+     later — are eased apart along the line so both stay visible; the
+     tooltip still names the real time. Defaults to a 7 AM–12 AM window (the
+     "Show full 24 hours" checkbox reveals anything outside it); a small
+     clock badge on a name flags activity that's currently hidden by that
+     window. Gear that was already out at midnight keeps the pinned
+     start-of-day dot, drawn with a red ring (and a small "overnight" label)
+     so it isn't just another checkout; the return that closes that loan
+     gets the same ring, on the whole dot if any item in it was overnight. */
   /* The section <summary> names this panel now, so the head carries the day
      nav, the 24-hour toggle, and the per-day overnight count. */
   .cio-timeline-head{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;}
@@ -392,9 +392,11 @@
   .cio-tl-pop ul{list-style:none;margin:8px 0 0;padding:0;border-top:1px solid var(--border);}
   .cio-tl-pop li{padding:6px 0;border-bottom:1px solid var(--border);}
   .cio-tl-pop li:last-child{border-bottom:none;}
+  .cio-tl-pop .eq{display:flex;align-items:baseline;gap:6px;}
   .cio-tl-pop .tag{font-weight:700;}
-  .cio-tl-pop .model{color:var(--sub);font-weight:500;}
-  .cio-tl-pop .meta{color:var(--sub);font-size:11.5px;margin-top:1px;}
+  .cio-tl-pop .model{color:var(--sub);font-weight:500;min-width:0;}
+  .cio-tl-pop .at{margin-left:auto;color:var(--sub);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .cio-tl-pop .meta{color:var(--sub);font-size:11.5px;margin-top:1px;overflow-wrap:anywhere;}
   .cio-timeline-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--c-violet);}
   .cio-timeline-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--sub);}
   .cio-timeline-legend span{display:inline-flex;align-items:center;gap:5px;}
@@ -6014,6 +6016,33 @@ function cioTlTimeSpan(list){
   const b = cioTlExactTime(xs[xs.length - 1]);
   return a === b ? a : a + " – " + b;
 }
+// Hover text for a numbered dot: "6 items, 1:02–1:09 PM". Minute precision,
+// and the meridiem is written once when both ends share it. The popover
+// keeps seconds, one time per item.
+function cioTlTipRange(msList){
+  const xs = msList.filter(ms => isFinite(ms)).slice().sort((a, b) => a - b);
+  if (!xs.length) return "—";
+  const fmt = ms => new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const a = fmt(xs[0]);
+  const b = fmt(xs[xs.length - 1]);
+  if (a === b) return a;
+  const mer = s => {
+    const m = String(s).match(/([AP]M)\s*$/i);
+    return m ? m[1].toUpperCase() : "";
+  };
+  const ma = mer(a), mb = mer(b);
+  if (ma && ma === mb) return a.replace(/\s*[AP]M\s*$/i, "") + "–" + b;
+  return a + "–" + b;
+}
+// Short loan label for a popover line. A shared checkoutId and an older
+// one-id-per-device row both name their checkoutId; a row with none is a
+// legacy row keyed by its own id. Display only.
+function cioTlLoanBit(row){
+  if (!row) return "";
+  const loan = cioLoanId(row);
+  if (loan) return "Loan " + loan;
+  return row.id ? "Legacy row" : "";
+}
 function cioTlDateLabel(ms, dayStart){
   const d = new Date(ms);
   if (isNaN(d.getTime())) return "earlier";
@@ -6022,11 +6051,13 @@ function cioTlDateLabel(ms, dayStart){
     ? { month: "short", day: "numeric" }
     : { month: "short", day: "numeric", year: "numeric" });
 }
-// One block of the popover: same action, same minute, one moderator.
+// One block of the popover: one timeline dot, one moderator.
 function cioTlGroupShell(evs, moderator, action, actionLabel){
   const partners = new Set(evs.map(e => e.partner || ""));
   const onePartner = partners.size === 1 ? [...partners][0] : "";
   const returners = [...new Set(evs.map(e => e.returnedBy || "").filter(Boolean))];
+  const loans = evs.map(e => e.loanLabel || "");
+  const showLoan = new Set(loans.filter(Boolean)).size > 1;
   return {
     action, actionLabel,
     timeLabel: cioTlTimeSpan(evs.map(e => e.ms)),
@@ -6034,8 +6065,11 @@ function cioTlGroupShell(evs, moderator, action, actionLabel){
     partner: onePartner,
     returnedBy: returners.length === 1 ? returners[0] : "",
     note: "",
-    items: evs.map(e => {
+    items: evs.map((e, i) => {
       const it = Object.assign({}, e.item || {});
+      it.at = cioTlExactTime(e.ms);
+      if (showLoan && loans[i]) it.loan = loans[i];
+      if (e.batchLabel) it.batch = e.batchLabel;
       if (!onePartner && e.partner) it.partner = e.partner;
       if (returners.length > 1 && e.returnedBy) it.returnedBy = e.returnedBy;
       return it;
@@ -6045,6 +6079,12 @@ function cioTlGroupShell(evs, moderator, action, actionLabel){
 function cioTlPayloadFromEvents(evs, moderator){
   const sorted = evs.slice().sort((a, b) => a.ms - b.ms
     || String((a.item && a.item.tag) || "").localeCompare(String((b.item && b.item.tag) || "")));
+  const trips = cioTripIndex();
+  sorted.forEach(e => {
+    e.loanLabel = cioTlLoanBit(e.row);
+    const trip = e.row ? trips[cioRowLoanKey(e.row)] : null;
+    e.batchLabel = trip && trip.size > 1 ? "Batch of " + trip.size : "";
+  });
   const type = sorted[0].type === "checkin" ? "checkin" : "checkout";
   const shell = cioTlGroupShell(sorted, moderator, type, type === "checkout" ? "Checked out" : "Checked in");
   if (type === "checkin"){
@@ -6081,6 +6121,7 @@ function cioTlPayloadFromHeld(entries, moderator, dayStart){
     const asEvents = list.map(e => ({
       ms: e.outMs,
       partner: e.partner || "",
+      loanLabel: cioTlLoanBit(e.out),
       item: cioTlGearItem(e.out, e.back || null)
     }));
     return cioTlGroupShell(asEvents, moderator, "still", "Still out from " + cioTlDateLabel(list[0].outMs, dayStart));
@@ -6098,9 +6139,11 @@ function cioTlPopHtml(payload){
         it.partner ? "with " + it.partner : "",
         it.returnedBy ? "returned by " + it.returnedBy : ""
       ].filter(Boolean).join(" · ");
+      const loanBits = [it.loan, it.batch].filter(Boolean).join(" · ");
       return `<li>
-        <div class="eq"><span class="tag">${escapeHtmlCio(it.tag || "—")}</span>${it.model ? ` <span class="model">${escapeHtmlCio(it.model)}</span>` : ""}</div>
+        <div class="eq"><span class="tag">${escapeHtmlCio(it.tag || "—")}</span>${it.model ? `<span class="model">${escapeHtmlCio(it.model)}</span>` : ""}${it.at ? `<span class="at">${escapeHtmlCio(it.at)}</span>` : ""}</div>
         ${bits.length ? `<div class="meta">${escapeHtmlCio(bits.join(" · "))}</div>` : ""}
+        ${loanBits ? `<div class="meta">${escapeHtmlCio(loanBits)}</div>` : ""}
         ${extra ? `<div class="meta">${escapeHtmlCio(extra)}</div>` : ""}
       </li>`;
     }).join("");
@@ -6194,16 +6237,64 @@ function cioShowDotPop(dot){
   cioPlaceDotPop(dot);
 }
 
-// A per-moderator, per-day timeline: one dot per batch — same action and,
-// when the rows share a checkoutId, that id; otherwise the same clock minute
-// — yellow for a checkout, green for a check-in, against a plain grey
-// baseline. The count sits inside the dot when the batch has more than
-// one item. Hover names the time and the count; click or tap lists the gear.
-// Batches closer than their own widths are then eased apart by
-// cioSpreadTimelineDots (same path for the 7 AM–midnight window and the full
-// day). Anything outside the visible window still gets a small badge on that
-// mod's name rather than silently vanishing. Respects the Project filter and
-// the day picked via the ‹/› buttons (cioTimelineDate, never later than today).
+// Timeline dots only. Same moderator and same action chain into one numbered
+// dot when each event is within this of the previous event in the group.
+// 1:00, then 1:09, then 1:18 stay together. 1:00 and 1:09, then 1:25, split
+// because 1:25 is sixteen minutes after 1:09. Not the trip gap
+// (CIO_ACT_GAP_MS) and not used for pairing, counts, or KPIs.
+const CIO_TIMELINE_DOT_GAP_MS = 10 * 60 * 1000;
+
+// Display grouping for one moderator's visible dots. `eventDots` is in time
+// order. Checkout and check-in are separate chains, so a return never joins
+// a checkout. Shared checkoutIds, one-id-per-device rows, and rows with no
+// checkoutId all use this one rule. The pinned start-of-day marker is not
+// in this list.
+function cioTlChainEventDots(eventDots){
+  const open = { checkout: null, checkin: null };
+  const groups = [];
+  eventDots.forEach(d => {
+    const type = d.ev && d.ev.type === "checkin" ? "checkin" : "checkout";
+    const g = open[type];
+    const prev = g && g[g.length - 1];
+    if (prev && d.ev.ms >= prev.ev.ms && (d.ev.ms - prev.ev.ms) <= CIO_TIMELINE_DOT_GAP_MS){
+      g.push(d);
+      return;
+    }
+    const next = [d];
+    open[type] = next;
+    groups.push(next);
+  });
+  return groups;
+}
+
+// Half-dot is decided for the whole dot. Judging each row at its own
+// 5-minute return batch would leave a chain half-yellow after the scan that
+// actually finished the trip. A chain that still leaves gear out stays split.
+function cioTlApplyGroupReturnState(members, trips, sessions){
+  if (!members.length || !members[0].ev || members[0].ev.type !== "checkin") return;
+  let endMs = -Infinity;
+  members.forEach(d => { if (d.ev.ms > endMs) endMs = d.ev.ms; });
+  members.forEach(d => {
+    const trip = trips[cioRowLoanKey(d.ev.row)];
+    if (!trip) return;
+    const back = cioTripReturnedBy(trip, sessions, endMs);
+    d.ev.tripSize = trip.size;
+    d.ev.tripBack = back;
+    d.ev.partial = trip.size > 1 && back < trip.size;
+    d.color = d.ev.partial ? "partial" : "green";
+  });
+}
+
+// A per-moderator, per-day timeline: one numbered dot per run of the same
+// action within CIO_TIMELINE_DOT_GAP_MS, yellow for a checkout and green for
+// a check-in, against a plain grey baseline. The count sits inside the dot
+// when the run has more than one item. Hover names the count and the time
+// range; click or tap lists every item at its own time. Dots closer than
+// their own widths are then eased apart by cioSpreadTimelineDots (same path
+// for the 7 AM–midnight window and the full day). Anything outside the
+// visible window still gets a small badge on that mod's name rather than
+// silently vanishing. Respects the Project filter and the day picked via
+// the ‹/› buttons (cioTimelineDate, never later than today).
 function renderCioModTimeline(){
   cioHideDotPop();
   cioTlDotPayloads = [];
@@ -6455,53 +6546,47 @@ function renderCioModTimeline(){
       }
       eventDots.push({ frac: axisFrac, color, label, overnight: !!ev.overnightClose, ev });
     });
-    // One dot per batch. Same moderator (this row) and same action. A shared
-    // checkoutId — one id on every device of that submission — is the batch,
-    // so a four-device loan is one dot reading "4" even when the scans cross
-    // a minute, and a return that mixes two loans stays two dots. Older rows
-    // have a different checkoutId per device, so they keep the same-minute
-    // grouping: a six-item return typed inside one minute is still one green
-    // dot, not six. A checkout and a check-in stay two dots even inside that
-    // minute, and the nudge keeps those from painting over each other. The
-    // dot sits on the first scan in the batch.
-    const sharedLoans = cioSharedCheckoutIds();
-    const buckets = new Map();
-    eventDots.forEach((d, i) => {
-      const co = cioLoanId(d.ev.row);
-      const key = (co && sharedLoans.has(co))
-        ? d.ev.type + "\u0000loan\u0000" + co
-        : d.ev.type + "\u0000min\u0000" + Math.floor(d.ev.ms / 60000);
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key).push(i);
-    });
-    buckets.forEach(idxs => {
-      const members = idxs.map(i => eventDots[i]);
+    // One numbered dot per run of the same action. Chained on
+    // CIO_TIMELINE_DOT_GAP_MS against the previous event in the group, so a
+    // shared checkoutId and a legacy row drawn ten minutes apart are one
+    // dot, and a scan eleven minutes later is not. A checkout and a check-in
+    // stay two dots even inside that window; cioSpreadTimelineDots keeps
+    // those from painting over each other. The dot sits on the earliest scan.
+    // The pinned start-of-day marker was pushed above and is not in this walk.
+    cioTlChainEventDots(eventDots).forEach(members => {
+      members.sort((a, b) => a.ev.ms - b.ev.ms);
+      cioTlApplyGroupReturnState(members, trips, sessions);
       const count = members.length;
       const payload = cioTlPayloadFromEvents(members.map(d => d.ev), name);
       const overnight = members.some(d => d.overnight);
-      // A mixed minute (one trip finished, another still partly out) keeps
+      // A mixed group (one trip finished, another still partly out) keeps
       // the half-dot, since "everything came back" would be the wrong read.
       const color = members[0].ev.type === "checkout" ? "yellow"
         : (members.some(d => d.color === "partial") ? "partial" : "green");
-      let label = members[0].label;
+      let label;
       if (count > 1){
-        const partners = [...new Set(members.map(d => otherName(d.ev.row, name)).filter(Boolean))];
-        const withName = partners.length === 1 ? partners[0] : "";
-        const when = timeFmt(members[0].ev.row.ts);
-        if (members[0].ev.type === "checkout"){
-          label = `Checked out ${count} items · ${when}${withName ? ` (with ${withName})` : ""}`;
-        } else {
-          const returners = [...new Set(members.map(d => d.ev.returnedBy).filter(Boolean))];
-          label = `Checked back in ${count} items · ${when}`
-            + (returners.length === 1 ? ` by ${returners[0]}` : (withName ? ` (with ${withName})` : ""));
+        label = count + " items, " + cioTlTipRange(members.map(d => d.ev.ms));
+        if (members[0].ev.type === "checkin"){
           const flagged = members.filter(d => d.ev.partial && d.ev.tripSize > 1);
           if (flagged.length && flagged.every(d => d.ev.tripSize === flagged[0].ev.tripSize && d.ev.tripBack === flagged[0].ev.tripBack)){
             const p = flagged[0].ev;
-            label += ` — ${p.tripBack} of ${p.tripSize} returned, ${p.tripSize - p.tripBack} still out`;
+            label += " — " + p.tripBack + " of " + p.tripSize + " returned, " + (p.tripSize - p.tripBack) + " still out";
           } else if (!flagged.length && members[0].ev.tripSize > 1 && members.every(d => d.ev.tripSize === members[0].ev.tripSize && !d.ev.partial)){
-            label += ` — completes the batch of ${members[0].ev.tripSize}`;
+            label += " — completes the batch of " + members[0].ev.tripSize;
           }
         }
+      } else if (members[0].ev.type === "checkin"){
+        const ev = members[0].ev;
+        const withName = otherName(ev.row, name);
+        label = `Checked back in ${timeFmt(ev.row.ts)}`
+          + (ev.returnedBy ? ` by ${ev.returnedBy}` : (withName ? ` (with ${withName})` : ""));
+        if (ev.partial && ev.tripSize > 1){
+          label += ` — ${ev.tripBack} of ${ev.tripSize} returned, ${ev.tripSize - ev.tripBack} still out`;
+        } else if (ev.tripSize > 1){
+          label += ` — completes the batch of ${ev.tripSize}`;
+        }
+      } else {
+        label = members[0].label;
       }
       dots.push({ frac: members[0].frac, color, label, overnight, count, payload });
     });
