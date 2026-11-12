@@ -5840,7 +5840,40 @@ function renderCioModTimeline(){
     return d ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : ts;
   };
 
-  const rows = Array.from(names).filter(Boolean).sort((a, b) => a.localeCompare(b)).map(name => {
+  // Row order for the day on screen. Recomputed here, so a date step or a
+  // data refresh (both re-enter this function) picks it up; the 24-hour
+  // toggle does not, because it only hides dots, it doesn't change which
+  // events belong to the day. Day bounds are the same dayStart/dayEnd the
+  // dots below are placed with.
+  //   1. Any check-out or check-in on the selected day, earliest event first.
+  //   2. No event that day, but still holding something checked out on an
+  //      earlier day (still out as of this day), earliest of those checkouts first.
+  //   3. Everyone else, A–Z — the order this list used to use for every row.
+  // Ties inside a tier fall through to the same alphabetical compare.
+  const activityRank = (name) => {
+    const m = byMod[name] || { held: [], events: [] };
+    if (m.events.length){
+      let earliest = Infinity;
+      m.events.forEach(ev => { if (ev.ms < earliest) earliest = ev.ms; });
+      return { tier: 0, time: earliest };
+    }
+    // Same "still out" test the pinned marker uses just below: no return,
+    // or the return lands after this day ends.
+    const stillOut = m.held.filter(s => !s.back || s.backMs >= dayEnd);
+    if (stillOut.length){
+      let earliest = Infinity;
+      stillOut.forEach(s => { if (s.outMs < earliest) earliest = s.outMs; });
+      return { tier: 1, time: earliest };
+    }
+    return { tier: 2, time: 0 };
+  };
+  const rows = Array.from(names).filter(Boolean).sort((a, b) => {
+    const ra = activityRank(a);
+    const rb = activityRank(b);
+    if (ra.tier !== rb.tier) return ra.tier - rb.tier;
+    if (ra.tier !== 2 && ra.time !== rb.time) return ra.time - rb.time;
+    return a.localeCompare(b);
+  }).map(name => {
     const m = byMod[name] || { held: [], events: [] };
     const dots = [];
     let hasOffWindow = false;
