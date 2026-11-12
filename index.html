@@ -299,15 +299,20 @@
      day for whichever day is selected via the ‹/› day-picker. A thin grey
      baseline runs the length of the row; a yellow dot appears at the exact
      moment that mod checks something out, a green dot at the exact moment
-     they check it back in — hover a dot for the precise timestamp. Two
-     events closer than a dot-width are eased apart along the line so both
-     stay visible; the tooltip still names the real time. Defaults to a
-     7 AM–12 AM window (the "Show full 24 hours" checkbox reveals anything
-     outside it); a small clock badge on a name flags activity that's
-     currently hidden by that window. */
-  /* The section <summary> names this panel now, so the head carries only the
-     day nav and the 24-hour toggle, right-aligned. */
+     they check it back in — hover a dot for the precise timestamp, click it
+     for the gear in that event. Two events closer than a dot-width are eased
+     apart along the line so both stay visible; the tooltip still names the
+     real time. Defaults to a 7 AM–12 AM window (the "Show full 24 hours"
+     checkbox reveals anything outside it); a small clock badge on a name
+     flags activity that's currently hidden by that window. Gear that was
+     already out at midnight keeps the pinned start-of-day dot, drawn with a
+     red ring (and a small "overnight" label) so it isn't just another
+     checkout; the return that closes that loan gets the same ring. */
+  /* The section <summary> names this panel now, so the head carries the day
+     nav, the 24-hour toggle, and the per-day overnight count. */
   .cio-timeline-head{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;}
+  .cio-timeline-overnight{margin-right:auto;font-size:12px;font-weight:700;color:var(--st-broken);background:var(--st-broken-bg);border-radius:999px;padding:2px 8px;white-space:nowrap;}
+  .cio-timeline-overnight[hidden]{display:none;}
   .cio-timeline-controls{display:flex;align-items:center;gap:14px;}
   .cio-timeline-checkbox{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--sub);cursor:pointer;white-space:nowrap;}
   .cio-timeline-checkbox input{margin:0;cursor:pointer;}
@@ -335,24 +340,57 @@
   .cio-timeline-offhours{font-size:10px;cursor:help;margin-left:2px;}
   .cio-timeline-track{position:relative;flex:1;height:18px;}
   .cio-timeline-baseline{position:absolute;left:0;right:0;top:50%;height:3px;border-radius:2px;background:var(--sub);opacity:.3;transform:translateY(-50%);}
-  .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;}
+  .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;touch-action:manipulation;}
+  /* A slightly larger hit target for taps. Kept inside the gap the nudge
+     leaves between neighbours (diameter + 2px), so a tap still lands on the
+     dot you aimed at when two events sit side by side. */
+  .cio-timeline-dot::before{content:"";position:absolute;inset:-3px;}
   .cio-timeline-dot.yellow{background:#d97706;}
   .cio-timeline-dot.green{background:#16a34a;}
   /* Partly returned: literally half the dot. Left half is the checked-out
      colour, right half the checked-in colour, so it reads as "some of this
      batch came back" without adding a third hue to the legend. */
   .cio-timeline-dot.partial{background:linear-gradient(90deg,#d97706 0 50%,#16a34a 50% 100%);}
-  .cio-timeline-dot:hover{z-index:6;}
+  .cio-timeline-dot:hover,.cio-timeline-dot.open{z-index:6;}
+  .cio-timeline-dot:focus-visible{outline:2px solid var(--c-violet);outline-offset:3px;z-index:7;}
+  /* Overnight: out past this day's midnight. The white gap keeps the red
+     ring off the fill so it still reads as yellow or green, not a new dot
+     colour. The word sits on the pinned start marker only — the return that
+     closes the loan is the same ring on its own green dot, and a label there
+     would cover the nudge. */
+  .cio-timeline-dot.overnight{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--st-broken);}
+  .cio-timeline-dot.pinned.overnight::after{content:"overnight";position:absolute;left:calc(100% + 4px);top:50%;transform:translateY(-50%);font-size:8px;font-weight:700;letter-spacing:.02em;line-height:1;color:var(--st-broken);background:var(--st-broken-bg);border-radius:999px;padding:2px 4px;white-space:nowrap;}
   /* Lives on <body>, not inside .cio-timeline-list — a scroll container clips
      its own overflow, which would have hidden a tooltip on whichever row is
      currently at the top of the visible window. Positioned by cioShowDotTip(). */
   .cio-tl-tip{position:fixed;background:var(--ink);color:var(--panel);font-size:10.5px;font-weight:600;padding:4px 8px;border-radius:5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;transform:translate(-50%,-100%);}
   .cio-tl-tip.show{opacity:1;}
+  /* Click/tap a dot. Lives on <body> for the same reason the tooltip does:
+     the timeline list scrolls, and a scroll container would clip a popover
+     that hangs off the top row. */
+  .cio-tl-pop{position:fixed;z-index:30;width:min(320px,calc(100vw - 16px));max-height:min(360px,calc(100vh - 16px));overflow:auto;background:var(--panel);color:var(--ink);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px rgba(28,27,41,.18);padding:10px 12px;font-size:12px;}
+  .cio-tl-pop[hidden]{display:none;}
+  .cio-tl-pop-block + .cio-tl-pop-block{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+  .cio-tl-pop .act{font-weight:700;font-size:12.5px;}
+  .cio-tl-pop .act.checkout{color:#d97706;}
+  .cio-tl-pop .act.checkin{color:var(--st-inuse);}
+  .cio-tl-pop .act.still{color:var(--st-broken);}
+  .cio-tl-pop .when{color:var(--sub);font-size:11.5px;margin-top:2px;}
+  .cio-tl-pop .who{margin-top:4px;font-weight:600;}
+  .cio-tl-pop .who .k{display:inline-block;min-width:76px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);}
+  .cio-tl-pop .note{margin-top:6px;font-size:11.5px;color:var(--sub);}
+  .cio-tl-pop ul{list-style:none;margin:8px 0 0;padding:0;border-top:1px solid var(--border);}
+  .cio-tl-pop li{padding:6px 0;border-bottom:1px solid var(--border);}
+  .cio-tl-pop li:last-child{border-bottom:none;}
+  .cio-tl-pop .tag{font-weight:700;}
+  .cio-tl-pop .model{color:var(--sub);font-weight:500;}
+  .cio-tl-pop .meta{color:var(--sub);font-size:11.5px;margin-top:1px;}
   .cio-timeline-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--c-violet);}
   .cio-timeline-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--sub);}
   .cio-timeline-legend span{display:inline-flex;align-items:center;gap:5px;}
   .cio-timeline-legend i{width:9px;height:9px;border-radius:50%;display:inline-block;}
   .cio-timeline-legend i.base{border-radius:2px;opacity:.5;}
+  .cio-timeline-legend i.overnight{background:#d97706;box-shadow:0 0 0 1.5px var(--panel),0 0 0 3px var(--st-broken);margin-right:2px;}
 
   /* Damaged-on-return list under the condition donut — newest first, so
      whoever's checking this knows what to look into first. */
@@ -753,6 +791,7 @@
       <div class="cio-pair">
       <div class="cio-mini-widget">
         <div class="cio-timeline-head">
+          <span class="cio-timeline-overnight" id="cio-timeline-overnight" hidden></span>
           <div class="cio-timeline-controls">
             <label class="cio-timeline-checkbox"><input type="checkbox" id="cio-timeline-full-day"> Show full 24 hours</label>
             <div class="cio-timeline-nav">
@@ -769,6 +808,7 @@
           <span><i style="background:#d97706;"></i>Checked out (hover a dot for the time)</span>
           <span><i style="background:#16a34a;"></i>Checked back in</span>
           <span><i style="background:linear-gradient(90deg,#d97706 0 50%,#16a34a 50% 100%);"></i>Partly returned — rest of the batch still out</span>
+          <span><i class="overnight"></i>Overnight — out past midnight (red ring also marks the return)</span>
         </div>
       </div>
       <div class="cio-pair-side" id="cio-mini-widget">
@@ -5783,17 +5823,224 @@ function cioSpreadTimelineDots(){
     const offsets = cioTimelineDotOffsets(dots, width, minSep);
     dotEls.forEach((el, i) => { el.style.left = cioTimelineDotLeft(dots[i].frac, offsets[i]); });
   });
+  // Nudging moves the dot the popover is glued to. Follow it; a detached
+  // dot means a re-render already closed the popover.
+  if (cioTlPopDot && cioTlPopDot.isConnected && cioTlPop && !cioTlPop.hidden) cioPlaceDotPop(cioTlPopDot);
+  else if (cioTlPopDot && !cioTlPopDot.isConnected) cioHideDotPop();
+}
+
+// Gear named on a log row, for the dot popover. `fallback` fills blanks only,
+// so a check-in can keep its own condition and still show the destination
+// that was recorded on the check-out.
+function cioTlGearItem(row, fallback){
+  const src = row || {};
+  const fb = fallback || {};
+  const pick = (k) => {
+    const a = String(src[k] == null ? "" : src[k]).trim();
+    if (a) return a;
+    return String(fb[k] == null ? "" : fb[k]).trim();
+  };
+  return {
+    tag: pick("tag"), model: pick("model"), serial: pick("serial"),
+    condition: pick("condition"), destination: pick("destination")
+  };
+}
+function cioTlExactTime(ms){
+  const d = new Date(ms);
+  if (!isFinite(ms) || isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+}
+function cioTlTimeSpan(list){
+  const xs = list.filter(ms => isFinite(ms)).slice().sort((a, b) => a - b);
+  if (!xs.length) return "—";
+  const a = cioTlExactTime(xs[0]);
+  const b = cioTlExactTime(xs[xs.length - 1]);
+  return a === b ? a : a + " – " + b;
+}
+function cioTlDateLabel(ms, dayStart){
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return "earlier";
+  const sameYear = new Date(dayStart).getFullYear() === d.getFullYear();
+  return d.toLocaleDateString(undefined, sameYear
+    ? { month: "short", day: "numeric" }
+    : { month: "short", day: "numeric", year: "numeric" });
+}
+// One block of the popover: same action, same minute, one moderator.
+function cioTlGroupShell(evs, moderator, action, actionLabel){
+  const partners = new Set(evs.map(e => e.partner || ""));
+  const onePartner = partners.size === 1 ? [...partners][0] : "";
+  const returners = [...new Set(evs.map(e => e.returnedBy || "").filter(Boolean))];
+  return {
+    action, actionLabel,
+    timeLabel: cioTlTimeSpan(evs.map(e => e.ms)),
+    moderator,
+    partner: onePartner,
+    returnedBy: returners.length === 1 ? returners[0] : "",
+    note: "",
+    items: evs.map(e => {
+      const it = Object.assign({}, e.item || {});
+      if (!onePartner && e.partner) it.partner = e.partner;
+      if (returners.length > 1 && e.returnedBy) it.returnedBy = e.returnedBy;
+      return it;
+    })
+  };
+}
+function cioTlPayloadFromEvents(evs, moderator){
+  const sorted = evs.slice().sort((a, b) => a.ms - b.ms
+    || String((a.item && a.item.tag) || "").localeCompare(String((b.item && b.item.tag) || "")));
+  const type = sorted[0].type === "checkin" ? "checkin" : "checkout";
+  const shell = cioTlGroupShell(sorted, moderator, type, type === "checkout" ? "Checked out" : "Checked in");
+  if (type === "checkin"){
+    const flagged = sorted.filter(e => e.partial && e.tripSize > 1);
+    if (flagged.length && flagged.every(e => e.tripSize === flagged[0].tripSize && e.tripBack === flagged[0].tripBack)){
+      const p = flagged[0];
+      shell.note = p.tripBack + " of " + p.tripSize + " returned, " + (p.tripSize - p.tripBack) + " still out";
+    } else if (!flagged.length && sorted[0].tripSize > 1 && sorted.every(e => e.tripSize === sorted[0].tripSize && !e.partial)){
+      shell.note = "Completes the batch of " + sorted[0].tripSize;
+    }
+  }
+  return { groups: [shell] };
+}
+// The pinned start-of-day marker is one dot for every item carried across
+// midnight. Split it into one block per checkout minute so a 4pm loan and a
+// 6pm loan don't pretend to be a single batch.
+function cioTlPayloadFromHeld(entries, moderator, dayStart){
+  const byMin = new Map();
+  entries.forEach(e => {
+    const k = Math.floor(e.outMs / 60000);
+    if (!byMin.has(k)) byMin.set(k, []);
+    byMin.get(k).push(e);
+  });
+  const groups = [...byMin.keys()].sort((a, b) => a - b).map(k => {
+    const list = byMin.get(k).slice().sort((a, b) => a.outMs - b.outMs);
+    const asEvents = list.map(e => ({
+      ms: e.outMs,
+      partner: e.partner || "",
+      item: cioTlGearItem(e.out, e.back || null)
+    }));
+    return cioTlGroupShell(asEvents, moderator, "still", "Still out from " + cioTlDateLabel(list[0].outMs, dayStart));
+  });
+  return { groups };
+}
+function cioTlPopHtml(payload){
+  return (payload.groups || []).map(g => {
+    const items = (g.items || []).map(it => {
+      const bits = [];
+      if (it.serial) bits.push("S/N " + it.serial);
+      if (it.condition) bits.push(it.condition);
+      if (it.destination) bits.push("→ " + it.destination);
+      const extra = [
+        it.partner ? "with " + it.partner : "",
+        it.returnedBy ? "returned by " + it.returnedBy : ""
+      ].filter(Boolean).join(" · ");
+      return `<li>
+        <div class="eq"><span class="tag">${escapeHtmlCio(it.tag || "—")}</span>${it.model ? ` <span class="model">${escapeHtmlCio(it.model)}</span>` : ""}</div>
+        ${bits.length ? `<div class="meta">${escapeHtmlCio(bits.join(" · "))}</div>` : ""}
+        ${extra ? `<div class="meta">${escapeHtmlCio(extra)}</div>` : ""}
+      </li>`;
+    }).join("");
+    return `<section class="cio-tl-pop-block">
+      <div class="act ${escapeHtmlCio(g.action)}">${escapeHtmlCio(g.actionLabel || "")}</div>
+      <div class="when">${escapeHtmlCio(g.timeLabel || "")}</div>
+      <div class="who"><span class="k">Moderator</span> ${escapeHtmlCio(g.moderator || "")}</div>
+      ${g.partner ? `<div class="who"><span class="k">Partner</span> ${escapeHtmlCio(g.partner)}</div>` : ""}
+      ${g.returnedBy ? `<div class="who"><span class="k">Returned by</span> ${escapeHtmlCio(g.returnedBy)}</div>` : ""}
+      ${g.note ? `<div class="note">${escapeHtmlCio(g.note)}</div>` : ""}
+      <ul>${items}</ul>
+    </section>`;
+  }).join("");
+}
+function cioSetOvernightCount(n){
+  const el = document.getElementById("cio-timeline-overnight");
+  if (!el) return;
+  const count = n || 0;
+  if (!count){
+    el.hidden = true;
+    el.textContent = "";
+    el.removeAttribute("title");
+    return;
+  }
+  el.hidden = false;
+  el.textContent = count + " overnight";
+  el.title = count + (count === 1 ? " row" : " rows") + " with gear still out past midnight";
+}
+
+// Rebuilt on every timeline render. Index matches data-dot on the marker.
+let cioTlDotPayloads = [];
+let cioTlPopDot = null;
+let cioTlPop = null;
+
+function cioHideDotPop(){
+  if (cioTlPop){
+    cioTlPop.hidden = true;
+    cioTlPop.innerHTML = "";
+    cioTlPop.style.maxHeight = "";
+  }
+  if (cioTlPopDot){
+    cioTlPopDot.classList.remove("open");
+    cioTlPopDot.removeAttribute("aria-expanded");
+    cioTlPopDot = null;
+  }
+}
+function cioPlaceDotPop(dot){
+  if (!cioTlPop || cioTlPop.hidden) return;
+  const r = dot.getBoundingClientRect();
+  const margin = 8;
+  const gap = 10;
+  // Measure the natural height, then cap it to whichever side of the dot has
+  // room so a long batch scrolls inside the card instead of running off screen.
+  cioTlPop.style.maxHeight = "none";
+  cioTlPop.style.left = "0px";
+  cioTlPop.style.top = "0px";
+  const pw = cioTlPop.offsetWidth;
+  const natural = Math.min(cioTlPop.scrollHeight, 360);
+  const spaceBelow = window.innerHeight - r.bottom - gap - margin;
+  const spaceAbove = r.top - gap - margin;
+  const placeBelow = spaceBelow >= natural || spaceBelow >= spaceAbove;
+  const avail = Math.max(140, Math.min(360, placeBelow ? spaceBelow : spaceAbove));
+  cioTlPop.style.maxHeight = avail + "px";
+  const ph = cioTlPop.offsetHeight;
+  // Sit just to the right of the dot when it fits, so an early-morning event
+  // doesn't cover the moderator names. Otherwise the left, then centered.
+  let left = r.right + 14;
+  if (left + pw > window.innerWidth - margin) left = r.left - pw - 14;
+  if (left < margin) left = r.left + r.width / 2 - pw / 2;
+  left = Math.max(margin, Math.min(left, window.innerWidth - pw - margin));
+  let top = placeBelow ? r.bottom + gap : r.top - ph - gap;
+  if (top < margin) top = margin;
+  if (top + ph > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - margin - ph);
+  cioTlPop.style.left = left + "px";
+  cioTlPop.style.top = top + "px";
+}
+function cioShowDotPop(dot){
+  if (!dot || !cioTlPop) return;
+  const idx = parseInt(dot.getAttribute("data-dot"), 10);
+  const payload = cioTlDotPayloads[idx];
+  if (!payload) return;
+  if (cioTlPopDot && cioTlPopDot !== dot){
+    cioTlPopDot.classList.remove("open");
+    cioTlPopDot.removeAttribute("aria-expanded");
+  }
+  cioTlPopDot = dot;
+  dot.classList.add("open");
+  dot.setAttribute("aria-expanded", "true");
+  cioTlPop.innerHTML = cioTlPopHtml(payload);
+  cioTlPop.hidden = false;
+  cioPlaceDotPop(dot);
 }
 
 // A per-moderator, per-day timeline: a dot lands at the exact moment that
 // mod's checkout event happened (yellow) or their matching checkin happened
-// (green), against a plain grey baseline — hover a dot for the exact time.
-// Dots closer than their own width are then eased apart by cioSpreadTimelineDots
-// (same path for the 7 AM–midnight window and the full day). Anything outside
-// the visible window still gets a small badge on that mod's name rather than
-// silently vanishing. Respects the Project filter and the day picked via the
-// ‹/› buttons (cioTimelineDate, never later than today).
+// (green), against a plain grey baseline — hover a dot for the exact time,
+// click or tap it for the gear. Dots closer than their own width are then
+// eased apart by cioSpreadTimelineDots (same path for the 7 AM–midnight
+// window and the full day). Anything outside the visible window still gets a
+// small badge on that mod's name rather than silently vanishing. Respects the
+// Project filter and the day picked via the ‹/› buttons (cioTimelineDate,
+// never later than today).
 function renderCioModTimeline(){
+  cioHideDotPop();
+  cioTlDotPayloads = [];
   const listEl = document.getElementById("cio-timeline-list");
   const axisEl = document.getElementById("cio-timeline-axis");
   const labelEl = document.getElementById("cio-day-label");
@@ -5867,12 +6114,24 @@ function renderCioModTimeline(){
     const outNames = rowNames(s.out);
     const backNames = rowNames(s.back);
 
-    // Holding belongs to whoever signed it out.
+    // Holding belongs to whoever signed it out. This is also the overnight
+    // set: checked out before this day's midnight and not checked back in
+    // before it. dayStart / dayEnd are the same bounds the dots and the row
+    // order already use.
     if (s.out && s.outMs < dayStart && (!s.back || s.backMs >= dayStart)){
       outNames.forEach(n => { const m = slot(n); if (m) m.held.push(s); });
     }
     if (s.out && s.outMs >= dayStart && s.outMs < dayEnd){
-      outNames.forEach(n => { const m = slot(n); if (m) m.events.push({ ms: s.outMs, type: "checkout", row: s.out }); });
+      outNames.forEach(n => {
+        const m = slot(n);
+        if (!m) return;
+        m.events.push({
+          ms: s.outMs, type: "checkout", row: s.out,
+          item: cioTlGearItem(s.out),
+          partner: otherName(s.out, n),
+          returnedBy: "", partial: false, tripSize: 0, tripBack: 0, overnightClose: false
+        });
+      });
     }
     if (s.back && s.backMs >= dayStart && s.backMs < dayEnd){
       // The return lands on the track of everyone in the session, not just
@@ -5897,9 +6156,15 @@ function renderCioModTimeline(){
         const m = slot(n);
         if (!m) return;
         const byOther = !backNames.some(b => b.toLowerCase() === key);
+        const pairRow = s.out || s.back;
+        const onPair = rowNames(pairRow).some(p => p.toLowerCase() === key);
         m.events.push({ ms: s.backMs, type: "checkin", row: s.back,
+                        item: cioTlGearItem(s.back, s.out || null),
+                        partner: onPair ? otherName(pairRow, n) : "",
                         returnedBy: byOther ? String(s.back.modName || "").trim() : "",
-                        partial: isPartial, tripSize: trip ? trip.size : 0, tripBack: backByThen });
+                        partial: isPartial, tripSize: trip ? trip.size : 0, tripBack: backByThen,
+                        // Closes a loan that was already out at this day's midnight.
+                        overnightClose: !!(s.out && s.outMs < dayStart) });
       });
     }
   });
@@ -5920,6 +6185,7 @@ function renderCioModTimeline(){
 
   if (names.size === 0){
     listEl.innerHTML = '<div class="cio-empty">No moderators added yet.</div>';
+    cioSetOvernightCount(0);
     return;
   }
 
@@ -5989,12 +6255,17 @@ function renderCioModTimeline(){
       const withName = otherName(oldest.out, name);
       const withLabel = withName ? ` (with ${withName})` : "";
       const items = `${n} item${n === 1 ? "" : "s"}`;
-      dots.push({ frac: 0, color: "yellow",
+      const heldEntries = base.map(s => ({
+        outMs: s.outMs, out: s.out, back: s.back, partner: otherName(s.out, name)
+      }));
+      dots.push({ frac: 0, color: "yellow", pinned: true, overnight: true,
         label: open.length
           ? `Still out — ${items}, oldest checked out ${whenLabel}${withLabel}`
-          : `Already out at the start of the day — ${items} checked out ${whenLabel}${withLabel}, returned ${today ? "today" : "later that day"}` });
+          : `Already out at the start of the day — ${items} checked out ${whenLabel}${withLabel}, returned ${today ? "today" : "later that day"}`,
+        payload: cioTlPayloadFromHeld(heldEntries, name, dayStart) });
     }
 
+    const eventDots = [];
     m.events.slice().sort((a, b) => a.ms - b.ms).forEach(ev => {
       const rawFrac = (ev.ms - dayStart) / 86400000;
       const axisFrac = (rawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
@@ -6015,20 +6286,44 @@ function renderCioModTimeline(){
         }
         color = ev.partial ? "partial" : "green";
       }
-      dots.push({ frac: axisFrac, color, label });
+      eventDots.push({ frac: axisFrac, color, label, overnight: !!ev.overnightClose, ev });
     });
-    return { name, dots, hasOffWindow };
+    // Same moderator (this row), same action, same clock minute: one popover,
+    // even though the dots themselves stay separate so a close check-in and
+    // check-out can still be nudged apart. A minute is what lands on the same
+    // pixel before that nudge.
+    const buckets = new Map();
+    eventDots.forEach((d, i) => {
+      const key = d.ev.type + "\u0000" + Math.floor(d.ev.ms / 60000);
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(i);
+    });
+    buckets.forEach(idxs => {
+      const payload = cioTlPayloadFromEvents(idxs.map(i => eventDots[i].ev), name);
+      idxs.forEach(i => { eventDots[i].payload = payload; });
+    });
+    eventDots.forEach(d => dots.push(d));
+    return { name, dots, hasOffWindow, overnight: m.held.length > 0 };
   });
 
+  const dotHtml = (d) => {
+    const idx = cioTlDotPayloads.length;
+    cioTlDotPayloads.push(d.payload || { groups: [] });
+    const cls = ["cio-timeline-dot", d.color];
+    if (d.overnight) cls.push("overnight");
+    if (d.pinned) cls.push("pinned");
+    return `<span class="${cls.join(" ")}" style="left:${(d.frac * 100).toFixed(3)}%;" data-frac="${d.frac}" data-tip="${escapeHtmlCio(d.label)}" data-dot="${idx}" role="button" tabindex="0" aria-label="${escapeHtmlCio(d.label)}"></span>`;
+  };
   listEl.innerHTML = rows.map(r => `
     <div class="cio-timeline-row">
       <span class="cio-timeline-name cio-mod-link" role="button" tabindex="0" data-mod="${escapeHtmlCio(r.name)}" title="View ${escapeHtmlCio(r.name)}'s history">${escapeHtmlCio(r.name)}${r.hasOffWindow ? ` <span class="cio-timeline-offhours" title="Has activity outside the hours shown — check &quot;Show full 24 hours&quot;">⏱</span>` : ""}</span>
       <div class="cio-timeline-track">
         <div class="cio-timeline-baseline"></div>
-        ${r.dots.map(d => `<span class="cio-timeline-dot ${d.color}" style="left:${(d.frac * 100).toFixed(3)}%;" data-frac="${d.frac}" data-tip="${escapeHtmlCio(d.label)}"></span>`).join("")}
+        ${r.dots.map(dotHtml).join("")}
         ${showNowMarker ? `<span class="cio-timeline-now" style="left:${(nowAxisFrac * 100).toFixed(3)}%;"></span>` : ""}
       </div>
     </div>`).join("");
+  cioSetOvernightCount(rows.filter(r => r.overnight).length);
   cioSpreadTimelineDots();
 }
 
@@ -6237,9 +6532,51 @@ function cioHideDotTip(){ cioTlTip.classList.remove("show"); }
     if (e.target.closest && e.target.closest(".cio-timeline-dot")) cioHideDotTip();
   });
   // A tooltip pinned to old screen coords while the list scrolls under it
-  // would just be wrong, so drop it instead of trying to follow.
-  list.addEventListener("scroll", cioHideDotTip);
+  // would just be wrong, so drop it instead of trying to follow. The popover
+  // is anchored the same way, so it goes too.
+  list.addEventListener("scroll", () => { cioHideDotTip(); cioHideDotPop(); });
 })();
+
+// Click / tap a dot for the gear in that event. Same delegated listener as
+// the tooltip, so a re-render doesn't have to rebind. Outside click and
+// Escape dismiss it; another dot swaps it.
+cioTlPop = document.createElement("div");
+cioTlPop.className = "cio-tl-pop";
+cioTlPop.setAttribute("role", "dialog");
+cioTlPop.setAttribute("aria-label", "Equipment");
+cioTlPop.hidden = true;
+document.body.appendChild(cioTlPop);
+
+(function wireCioDotPop(){
+  const list = document.getElementById("cio-timeline-list");
+  if (!list) return;
+  const toggle = (dot) => {
+    if (cioTlPopDot === dot) cioHideDotPop();
+    else cioShowDotPop(dot);
+  };
+  list.addEventListener("click", e => {
+    const dot = e.target.closest && e.target.closest(".cio-timeline-dot");
+    if (!dot) return;
+    e.preventDefault();
+    toggle(dot);
+  });
+  list.addEventListener("keydown", e => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const dot = e.target.closest && e.target.closest(".cio-timeline-dot");
+    if (!dot || document.activeElement !== dot) return;
+    e.preventDefault();
+    toggle(dot);
+  });
+})();
+document.addEventListener("click", e => {
+  if (!cioTlPopDot) return;
+  if (cioTlPop && cioTlPop.contains(e.target)) return;
+  if (e.target.closest && e.target.closest(".cio-timeline-dot")) return;
+  cioHideDotPop();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && cioTlPopDot) cioHideDotPop();
+});
 
 // Track width is what turns a time-fraction into pixels, so the separation
 // has to be redone when the row gets wider or narrower (window resize, or
