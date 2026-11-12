@@ -299,10 +299,12 @@
      day for whichever day is selected via the ‹/› day-picker. A thin grey
      baseline runs the length of the row; a yellow dot appears at the exact
      moment that mod checks something out, a green dot at the exact moment
-     they check it back in — hover a dot for the precise timestamp. Defaults
-     to a 7 AM–12 AM window (the "Show full 24 hours" checkbox reveals
-     anything outside it); a small clock badge on a name flags activity
-     that's currently hidden by that window. */
+     they check it back in — hover a dot for the precise timestamp. Two
+     events closer than a dot-width are eased apart along the line so both
+     stay visible; the tooltip still names the real time. Defaults to a
+     7 AM–12 AM window (the "Show full 24 hours" checkbox reveals anything
+     outside it); a small clock badge on a name flags activity that's
+     currently hidden by that window. */
   /* The section <summary> names this panel now, so the head carries only the
      day nav and the 24-hour toggle, right-aligned. */
   .cio-timeline-head{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;}
@@ -4646,6 +4648,9 @@ function switchPageTab(tab){
   document.querySelectorAll(".page-section").forEach(sec => {
     sec.style.display = sec.getAttribute("data-page-section") === tab ? "" : "none";
   });
+  // The timeline is laid out while this section may still be display:none,
+  // which reports a 0px track. Re-spread once it has a real width.
+  if (tab === "checkinout") cioSpreadTimelineDots();
 }
 applyTheme(localStorage.getItem(THEME_KEY) || "light");
 
@@ -5697,14 +5702,97 @@ function renderCioIssues(){
   }).join("");
 }
 
+// Close events land on the same pixel: a checkout and its return 30 seconds
+// later is a fraction of one dot on both the 7 AM–midnight axis and the full
+// day, so the later dot paints over the earlier one. After each dot's ideal
+// x (a fraction of the track) is known, walk the row in time order. A centre
+// closer than one diameter plus a 2px gap is pushed right to
+// previous + diameter + gap. If that would run past the right edge, the
+// packed cluster slides left instead, so the dots stay side by side on the
+// line and the earlier event stays on the left. Returns a pixel offset per
+// input dot (placed centre minus ideal centre).
+function cioTimelineDotOffsets(dots, trackWidth, minSep){
+  const offsets = dots.map(() => 0);
+  if (!dots.length || !(trackWidth > 0) || !(minSep > 0)) return offsets;
+  const items = dots.map((d, i) => {
+    const frac = +d.frac || 0;
+    const ideal = frac * trackWidth;
+    return { i, frac, ideal, x: ideal };
+  });
+  items.sort((a, b) => a.frac - b.frac || a.i - b.i);
+
+  let clusterStart = 0;
+  for (let i = 0; i < items.length; i++){
+    if (i === 0){ clusterStart = 0; continue; }
+    const prev = items[i - 1];
+    if (items[i].ideal >= prev.x + minSep){
+      items[i].x = items[i].ideal;
+      clusterStart = i;
+      continue;
+    }
+    const shifted = prev.x + minSep;
+    if (shifted <= trackWidth){
+      items[i].x = shifted;
+      continue;
+    }
+    // Right edge: pack this cluster back onto the track, last dot on the edge.
+    let start = clusterStart;
+    const place = (from) => {
+      const count = i - from + 1;
+      for (let k = 0; k < count; k++) items[i - k].x = trackWidth - k * minSep;
+    };
+    place(start);
+    while (start > 0 && items[start].x < items[start - 1].x + minSep){
+      start--;
+      place(start);
+    }
+    clusterStart = start;
+    // More dots than the row can hold. Pin the earliest to the left edge and
+    // keep them in time order; the surplus hangs off the right.
+    if (items[start].x < 0){
+      const count = i - start + 1;
+      for (let k = 0; k < count; k++) items[start + k].x = k * minSep;
+    }
+  }
+  items.forEach(it => { offsets[it.i] = it.x - it.ideal; });
+  return offsets;
+}
+
+// Pixel nudge written as calc(% + Npx) so the underlying percentage still
+// follows the real time. Re-run after render and whenever the track width
+// changes — a fixed pixel offset computed at one width would overlap again
+// after a resize.
+function cioTimelineDotLeft(frac, offsetPx){
+  const pct = (frac * 100).toFixed(3);
+  const px = Math.round(offsetPx * 100) / 100;
+  if (Math.abs(px) < 0.05) return pct + "%";
+  const mag = Math.abs(px);
+  return px > 0 ? `calc(${pct}% + ${mag}px)` : `calc(${pct}% - ${mag}px)`;
+}
+
+function cioSpreadTimelineDots(){
+  const list = document.getElementById("cio-timeline-list");
+  if (!list) return;
+  list.querySelectorAll(".cio-timeline-track").forEach(track => {
+    const width = track.getBoundingClientRect().width;
+    const dotEls = Array.from(track.querySelectorAll(".cio-timeline-dot"));
+    if (!dotEls.length || !(width > 0)) return;
+    const diam = dotEls[0].offsetWidth || 11;
+    const minSep = diam + 2;
+    const dots = dotEls.map(el => ({ frac: parseFloat(el.getAttribute("data-frac")) || 0 }));
+    const offsets = cioTimelineDotOffsets(dots, width, minSep);
+    dotEls.forEach((el, i) => { el.style.left = cioTimelineDotLeft(dots[i].frac, offsets[i]); });
+  });
+}
+
 // A per-moderator, per-day timeline: a dot lands at the exact moment that
 // mod's checkout event happened (yellow) or their matching checkin happened
 // (green), against a plain grey baseline — hover a dot for the exact time.
-// Defaults to a 7 AM–12 AM window (cioTimelineFullDay toggles the full 24h);
-// anything outside the visible window still gets a small badge on that
-// mod's name rather than silently vanishing. Respects the Project filter
-// and the day picked via the ‹/› buttons (cioTimelineDate, never later
-// than today).
+// Dots closer than their own width are then eased apart by cioSpreadTimelineDots
+// (same path for the 7 AM–midnight window and the full day). Anything outside
+// the visible window still gets a small badge on that mod's name rather than
+// silently vanishing. Respects the Project filter and the day picked via the
+// ‹/› buttons (cioTimelineDate, never later than today).
 function renderCioModTimeline(){
   const listEl = document.getElementById("cio-timeline-list");
   const axisEl = document.getElementById("cio-timeline-axis");
@@ -5937,10 +6025,11 @@ function renderCioModTimeline(){
       <span class="cio-timeline-name cio-mod-link" role="button" tabindex="0" data-mod="${escapeHtmlCio(r.name)}" title="View ${escapeHtmlCio(r.name)}'s history">${escapeHtmlCio(r.name)}${r.hasOffWindow ? ` <span class="cio-timeline-offhours" title="Has activity outside the hours shown — check &quot;Show full 24 hours&quot;">⏱</span>` : ""}</span>
       <div class="cio-timeline-track">
         <div class="cio-timeline-baseline"></div>
-        ${r.dots.map(d => `<span class="cio-timeline-dot ${d.color}" style="left:${(d.frac * 100).toFixed(3)}%;" data-tip="${escapeHtmlCio(d.label)}"></span>`).join("")}
+        ${r.dots.map(d => `<span class="cio-timeline-dot ${d.color}" style="left:${(d.frac * 100).toFixed(3)}%;" data-frac="${d.frac}" data-tip="${escapeHtmlCio(d.label)}"></span>`).join("")}
         ${showNowMarker ? `<span class="cio-timeline-now" style="left:${(nowAxisFrac * 100).toFixed(3)}%;"></span>` : ""}
       </div>
     </div>`).join("");
+  cioSpreadTimelineDots();
 }
 
 const cioProjectFilterEl = document.getElementById("cio-project-filter");
@@ -6150,6 +6239,17 @@ function cioHideDotTip(){ cioTlTip.classList.remove("show"); }
   // A tooltip pinned to old screen coords while the list scrolls under it
   // would just be wrong, so drop it instead of trying to follow.
   list.addEventListener("scroll", cioHideDotTip);
+})();
+
+// Track width is what turns a time-fraction into pixels, so the separation
+// has to be redone when the row gets wider or narrower (window resize, or
+// the pair layout stacking under 1100px). Observing the list covers both;
+// setting left on the dots does not change the list's size.
+(function wireCioTimelineDotLayout(){
+  const list = document.getElementById("cio-timeline-list");
+  if (!list || typeof ResizeObserver === "undefined") return;
+  const ro = new ResizeObserver(() => cioSpreadTimelineDots());
+  ro.observe(list);
 })();
 
 render();
