@@ -297,9 +297,11 @@
 
   /* Moderator activity timeline — one row per moderator, x-axis is time of
      day for whichever day is selected via the ‹/› day-picker. A thin grey
-     baseline runs the length of the row. A checkout and a check-in in the
-     same clock minute collapse to one dot (yellow out, green in) with the
-     item count drawn inside it; a single item stays a plain dot. Hover names
+     baseline runs the length of the row. One batch is one dot (yellow out,
+     green in) with the item count drawn inside it; a single item stays a
+     plain dot. A batch written with one shared checkoutId groups on that id.
+     Older rows, one checkoutId per device, still group on the same clock
+     minute. Hover names
      the time and the count, click lists every item. Two batches closer than
      a dot-width — a checkout and the check-in a minute later — are eased
      apart along the line so both stay visible; the tooltip still names the
@@ -4745,7 +4747,7 @@ async function loadCheckInOutData(){
       // Moderators often work in pairs. The Check-In/Out site asks who you're
       // paired with at sign-in and puts that name here; blank means alone.
       // Both names live on ONE row — the event is not written twice — so
-      // checkoutId pairing is untouched.
+      // pairing still sees one row per device, not one row per person.
       partner: String(r.partner || "").trim(),
       // Read for the moderator profile panel. Both already exist in the
       // CheckoutLog table; nothing on the flow side needed changing.
@@ -4778,46 +4780,195 @@ function parseCioTs(ts){
   return isNaN(d.getTime()) ? null : d;
 }
 
-// Every checkout/checkin pair in the log, keyed by checkoutId, keeping the
-// EARLIEST row of each type — a device checked in twice keeps the real
-// return. The timeline, the partial-return marks and the mini list all read
-// this one map, so they cannot disagree about whether something came back.
-function cioSessionMap(){
-  const sessions = {};
+// checkoutId is the loan. A loan written before shared ids (and a new loan of
+// one device) has exactly one checkout row, and any check-in carrying that id
+// closes it — that is the pairing every panel already used. A loan written
+// after the change has the SAME checkoutId on every device row. Pairing on
+// the id alone would hand the whole loan back when the first device returned.
+function cioLoanId(e){
+  return String((e && e.checkoutId) || "").trim();
+}
+function cioNormId(v){
+  return String(v ?? "").trim().toLowerCase();
+}
+// Placeholders that show up when a serial or tag was never recorded. Two of
+// those are not the same physical item.
+function cioBlankIdentity(v){
+  const s = cioNormId(v);
+  return !s || s === "—" || s === "-" || s === "–" || s === "n/a" || s === "na" || s === "none" || s === "unknown" || s === "tbd";
+}
+// A check-in closes one checkout row of the same loan. deviceId is what the
+// check-in copies off that row. Serial, then tag, only cover a row whose
+// deviceId was never stored. When both rows name a deviceId, a different id
+// is a different device even if the tag or serial happens to agree.
+function cioSameLoanDevice(checkout, checkin){
+  const a = cioNormId(checkout.deviceId);
+  const b = cioNormId(checkin.deviceId);
+  if (a && b) return a === b;
+  const serA = cioNormId(checkout.serial), serB = cioNormId(checkin.serial);
+  if (!cioBlankIdentity(serA) && serA === serB) return true;
+  const tagA = cioNormId(checkout.tag), tagB = cioNormId(checkin.tag);
+  if (!cioBlankIdentity(tagA) && tagA === tagB) return true;
+  return false;
+}
+function cioRowMs(e){
+  const t = parseCioTs(e && e.ts);
+  return t ? t.getTime() : null;
+}
+function cioByRowTime(a, b){
+  const am = cioRowMs(a), bm = cioRowMs(b);
+  const av = am === null ? Infinity : am;
+  const bv = bm === null ? Infinity : bm;
+  if (av !== bv) return av - bv;
+  return (a._row || 0) - (b._row || 0);
+}
+// checkoutIds that appear on more than one checkout row. Those are the shared
+// loans. A single checkout row — every older loan, and a new loan of one
+// device — is not in here, and keeps the checkoutId-only key.
+function cioSharedCheckoutIds(){
+  const counts = new Map();
   checkInOutLog.forEach(e => {
-    const t = parseCioTs(e.ts);
-    if (!t) return;
-    const k = e.checkoutId || e.id;
-    if (!k) return;
-    const sess = sessions[k] || (sessions[k] = { key: k, out: null, outMs: 0, back: null, backMs: 0 });
-    const ms = t.getTime();
-    if (e.eventType === "checkout"){
-      if (!sess.out || ms < sess.outMs){ sess.out = e; sess.outMs = ms; }
-    } else if (e.eventType === "checkin"){
-      if (!sess.back || ms < sess.backMs){ sess.back = e; sess.backMs = ms; }
-    }
+    if (e.eventType !== "checkout" || cioRowMs(e) === null) return;
+    const loan = cioLoanId(e);
+    if (!loan) return;
+    counts.set(loan, (counts.get(loan) || 0) + 1);
   });
-  return sessions;
+  const shared = new Set();
+  counts.forEach((n, loan) => { if (n > 1) shared.add(loan); });
+  return shared;
 }
 
-// A "trip" is the batch of devices that went out together. Deliberately the
-// SAME batching the Grouped activity view uses (same pair, same place, each
-// row within 5 minutes of the previous one) so the app has one definition of
-// a batch rather than two that drift apart.
+// One session per device loan. `key` is what the timeline, the trip index and
+// the return-batch clock all look up, so they cannot disagree about whether
+// something came back. For a one-row loan the key is checkoutId || id, the
+// same string those lookups used before. For a shared loan it is that id plus
+// the checkout row, so two devices never collapse into one session.
 //
-// Returns checkoutId -> { ids, size }. A trip of one can never be partial,
+// Rebuilt when the log array is replaced (every successful load). Callers
+// must not keep a sessions object across a reload.
+let cioPairCache = null;
+function cioPairedLog(){
+  if (cioPairCache && cioPairCache.source === checkInOutLog) return cioPairCache;
+  const sessions = {};
+  // Keyed by row id, not object identity. The checked-out list copies each
+  // open row before it renders, and a copy would miss a WeakMap/Map held on
+  // the original object — the partial note would then vanish.
+  const keyById = new Map();
+  const remember = (row, key) => { if (row && row.id) keyById.set(row.id, key); };
+  const add = (key, out, back) => {
+    if (!key) return;
+    const outMs = cioRowMs(out) || 0;
+    const backMs = cioRowMs(back) || 0;
+    sessions[key] = { key, out, outMs, back, backMs };
+    remember(out, key);
+    remember(back, key);
+  };
+
+  const byLoan = new Map();
+  const loose = [];
+  checkInOutLog.forEach(e => {
+    if (e.eventType !== "checkout" && e.eventType !== "checkin") return;
+    // A row with no readable time never joined a session before (the map
+    // skipped it). Leaving it out keeps a bad timestamp from closing a loan
+    // the timeline cannot place, and from moving a legacy key.
+    if (cioRowMs(e) === null) return;
+    const loan = cioLoanId(e);
+    if (!loan){ loose.push(e); return; }
+    if (!byLoan.has(loan)) byLoan.set(loan, []);
+    byLoan.get(loan).push(e);
+  });
+
+  // No checkoutId at all: the old key was the row id, so a checkout and a
+  // check-in were never the same session. Keep that.
+  loose.forEach(e => {
+    const key = String(e.id || "");
+    if (!key) return;
+    if (e.eventType === "checkout") add(key, e, null);
+    else add(key, null, e);
+  });
+
+  const shared = cioSharedCheckoutIds();
+  byLoan.forEach((list, loan) => {
+    const checkouts = list.filter(e => e.eventType === "checkout").sort(cioByRowTime);
+    const checkins = list.filter(e => e.eventType === "checkin").sort(cioByRowTime);
+    if (!shared.has(loan)){
+      // One checkout row (or only check-ins left after the log was trimmed).
+      // Any check-in with this id closes it. A device checked in twice keeps
+      // the earliest return — the real one. Later check-ins still point at
+      // the same key so the return-batch clock sees them, as it used to.
+      const out = checkouts[0] || null;
+      const back = checkins[0] || null;
+      add(loan, out, back);
+      checkins.forEach(ci => remember(ci, loan));
+      return;
+    }
+    // Shared loan: one session per checkout row. Each check-in closes the
+    // oldest still-open row of that same device, and a second check-in of a
+    // device that is already back does not open a second session.
+    const slots = checkouts.map(co => ({ co, back: null }));
+    checkins.forEach(ci => {
+      const ciMs = cioRowMs(ci);
+      const slot = slots.find(s => !s.back && (cioRowMs(s.co) || 0) <= ciMs && cioSameLoanDevice(s.co, ci));
+      if (slot){ slot.back = ci; return; }
+      if (slots.some(s => s.back && cioSameLoanDevice(s.co, ci))) return;
+      add(loan + "\u0000" + String(ci.id || "ci"), null, ci);
+    });
+    slots.forEach(s => {
+      add(loan + "\u0000" + String(s.co.id || ""), s.co, s.back);
+    });
+  });
+
+  cioPairCache = { source: checkInOutLog, sessions, keyById };
+  return cioPairCache;
+}
+// Session key for a log row. Falls back to checkoutId || id only for a row
+// that never entered a session (no readable time), which is what the old
+// lookups returned for it.
+function cioRowLoanKey(row){
+  if (!row) return "";
+  const hit = row.id && cioPairedLog().keyById.get(row.id);
+  if (hit) return hit;
+  return String(row.checkoutId || row.id || "");
+}
+function cioSessionMap(){
+  return cioPairedLog().sessions;
+}
+
+// A "trip" is the batch of devices that went out together.
+//
+// A shared checkoutId IS that batch: every device row of the submission
+// carries it, including one whose rows straddle a minute. Older rows have a
+// different checkoutId per device, so they keep the Grouped activity view's
+// batching (same pair, same place, each row within 5 minutes of the previous
+// one). On a log with no shared ids that is every checkout, so the trips are
+// the ones this function built before.
+//
+// Returns sessionKey -> { ids, size }. A trip of one can never be partial,
 // which is what stops solo gear raising a false flag.
 function cioTripIndex(){
   const checkouts = checkInOutLog
     .filter(cioMatchesSelectedProject)
     .filter(r => r.eventType === "checkout")
     .slice().sort((a, b) => (b._row || 0) - (a._row || 0));
+  const shared = cioSharedCheckoutIds();
   const index = {};
-  cioActGroups(checkouts).forEach(g => {
-    const ids = g.rows.map(r => r.checkoutId || r.id).filter(Boolean);
+  const put = (rows) => {
+    const ids = rows.map(r => cioRowLoanKey(r)).filter(Boolean);
+    if (!ids.length) return;
     const trip = { ids, size: ids.length };
     ids.forEach(id => { index[id] = trip; });
+  };
+  const byLoan = new Map();
+  const legacy = [];
+  checkouts.forEach(r => {
+    const loan = cioLoanId(r);
+    if (loan && shared.has(loan)){
+      if (!byLoan.has(loan)) byLoan.set(loan, []);
+      byLoan.get(loan).push(r);
+    } else legacy.push(r);
   });
+  byLoan.forEach(rows => put(rows));
+  cioActGroups(legacy).forEach(g => put(g.rows));
   return index;
 }
 
@@ -4847,20 +4998,19 @@ function cioReturnBatchEnd(){
   cioActGroups(checkins).forEach(g => {
     let end = 0;
     g.rows.forEach(r => { const ms = cioActMs(r); if (ms !== null && ms > end) end = ms; });
-    g.rows.forEach(r => { const k = r.checkoutId || r.id; if (k && end) endByKey[k] = end; });
+    g.rows.forEach(r => { const k = cioRowLoanKey(r); if (k && end) endByKey[k] = end; });
   });
   return endByKey;
 }
 
 function cioOpenCheckouts(){
-  const byId = {};
-  checkInOutLog.forEach(e => {
-    if (!byId[e.checkoutId]) byId[e.checkoutId] = {};
-    byId[e.checkoutId][e.eventType] = e;
-  });
-  return Object.values(byId)
-    .filter(pair => pair.checkout && !pair.checkin)
-    .map(pair => pair.checkout);
+  // Same sessions the timeline and the profile read. A one-row loan is open
+  // until any check-in carries its checkoutId. A shared loan is open one
+  // device at a time: the two that came back are closed, the other two are
+  // still this list.
+  return Object.values(cioSessionMap())
+    .filter(s => s.out && !s.back)
+    .map(s => s.out);
 }
 
 // Groups a list of open checkouts by moderator name, e.g. "Lesther (4)" —
@@ -5069,24 +5219,17 @@ function cioModSessions(name){
   // return and every such session looked permanently open. That's what showed
   // items as "5.3d so far · Overdue" while the dashboard correctly counted
   // zero out — the dashboard pairs across the whole log, and now so does this.
-  const myCheckoutIds = new Set();
-  checkInOutLog.forEach(e => { if (isMine(e)) myCheckoutIds.add(e.checkoutId || e.id); });
-
-  const byCo = {};
+  // The key is the paired session, not checkoutId alone, so a shared loan
+  // counts one session per device rather than one session for the whole loan.
+  const paired = cioPairedLog();
+  const mine = new Set();
   checkInOutLog.forEach(e => {
-    const k = e.checkoutId || e.id;
-    if (!myCheckoutIds.has(k)) return;
-    if (!byCo[k]) byCo[k] = { out: null, back: null };
-    const t = parseCioTs(e.ts)?.getTime() || 0;
-    if (e.eventType === "checkout"){
-      if (!byCo[k].out || t < (parseCioTs(byCo[k].out.ts)?.getTime() || 0)) byCo[k].out = e;
-    } else if (e.eventType === "checkin"){
-      // A device checked in twice keeps the EARLIEST return — the real one.
-      if (!byCo[k].back || t < (parseCioTs(byCo[k].back.ts)?.getTime() || 0)) byCo[k].back = e;
-    }
+    if (!isMine(e)) return;
+    const k = e.id && paired.keyById.get(e.id);
+    if (k) mine.add(k);
   });
   const now = Date.now();
-  return Object.values(byCo).map(p => {
+  return Object.values(paired.sessions).filter(p => mine.has(p.key)).map(p => {
     const src = p.out || p.back;
     if (!src) return null;
     const outMs = p.out ? (parseCioTs(p.out.ts)?.getTime() || 0) : 0;
@@ -5916,17 +6059,25 @@ function cioTlPayloadFromEvents(evs, moderator){
   return { groups: [shell] };
 }
 // The pinned start-of-day marker is one dot for every item carried across
-// midnight. Split it into one block per checkout minute so a 4pm loan and a
-// 6pm loan don't pretend to be a single batch.
+// midnight. Split it into one block per loan: a shared checkoutId is one
+// block even when the scans crossed a minute, and older rows (one checkoutId
+// per device) stay one block per checkout minute, so a 4pm loan and a 6pm
+// loan don't pretend to be a single batch.
 function cioTlPayloadFromHeld(entries, moderator, dayStart){
-  const byMin = new Map();
+  const sharedLoans = cioSharedCheckoutIds();
+  const byKey = new Map();
   entries.forEach(e => {
-    const k = Math.floor(e.outMs / 60000);
-    if (!byMin.has(k)) byMin.set(k, []);
-    byMin.get(k).push(e);
+    const co = cioLoanId(e.out);
+    const k = (co && sharedLoans.has(co))
+      ? "loan\u0000" + co
+      : "min\u0000" + Math.floor(e.outMs / 60000);
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(e);
   });
-  const groups = [...byMin.keys()].sort((a, b) => a - b).map(k => {
-    const list = byMin.get(k).slice().sort((a, b) => a.outMs - b.outMs);
+  const groups = [...byKey.values()]
+    .map(list => list.slice().sort((a, b) => a.outMs - b.outMs))
+    .sort((a, b) => a[0].outMs - b[0].outMs)
+    .map(list => {
     const asEvents = list.map(e => ({
       ms: e.outMs,
       partner: e.partner || "",
@@ -6043,9 +6194,10 @@ function cioShowDotPop(dot){
   cioPlaceDotPop(dot);
 }
 
-// A per-moderator, per-day timeline: one dot per batch — same action, same
-// clock minute — yellow for a checkout, green for a check-in, against a plain
-// grey baseline. The count sits inside the dot when the batch has more than
+// A per-moderator, per-day timeline: one dot per batch — same action and,
+// when the rows share a checkoutId, that id; otherwise the same clock minute
+// — yellow for a checkout, green for a check-in, against a plain grey
+// baseline. The count sits inside the dot when the batch has more than
 // one item. Hover names the time and the count; click or tap lists the gear.
 // Batches closer than their own widths are then eased apart by
 // cioSpreadTimelineDots (same path for the 7 AM–midnight window and the full
@@ -6082,8 +6234,9 @@ function renderCioModTimeline(){
   const nowAxisFrac = (nowRawFrac - axisStartFrac) / (axisEndFrac - axisStartFrac);
   const showNowMarker = today && nowAxisFrac >= 0 && nowAxisFrac <= 1;
 
-  // Sessions resolved by checkoutId across the WHOLE log, exactly as the KPI
-  // (cioOpenCheckouts) and the profile (cioModSessions) do.
+  // Sessions resolved across the WHOLE log, exactly as the KPI
+  // (cioOpenCheckouts) and the profile (cioModSessions) do: checkoutId alone
+  // for a one-row loan, checkoutId plus device for a shared loan.
   //
   // This used to be a +1-per-checkout / -1-per-checkin COUNTER run over a
   // single moderator's own rows, which was wrong in both directions.
@@ -6302,15 +6455,22 @@ function renderCioModTimeline(){
       }
       eventDots.push({ frac: axisFrac, color, label, overnight: !!ev.overnightClose, ev });
     });
-    // One dot per batch. Same moderator (this row), same action, same clock
-    // minute — the grouping the popover already used — so a six-item return
-    // is a single green dot reading "6", not six dots shoulder to shoulder.
-    // A checkout and a check-in stay two dots even inside that minute, and
-    // the nudge keeps those from painting over each other. The dot sits on
-    // the first scan in the batch; within one minute that is the same pixel.
+    // One dot per batch. Same moderator (this row) and same action. A shared
+    // checkoutId — one id on every device of that submission — is the batch,
+    // so a four-device loan is one dot reading "4" even when the scans cross
+    // a minute, and a return that mixes two loans stays two dots. Older rows
+    // have a different checkoutId per device, so they keep the same-minute
+    // grouping: a six-item return typed inside one minute is still one green
+    // dot, not six. A checkout and a check-in stay two dots even inside that
+    // minute, and the nudge keeps those from painting over each other. The
+    // dot sits on the first scan in the batch.
+    const sharedLoans = cioSharedCheckoutIds();
     const buckets = new Map();
     eventDots.forEach((d, i) => {
-      const key = d.ev.type + "\u0000" + Math.floor(d.ev.ms / 60000);
+      const co = cioLoanId(d.ev.row);
+      const key = (co && sharedLoans.has(co))
+        ? d.ev.type + "\u0000loan\u0000" + co
+        : d.ev.type + "\u0000min\u0000" + Math.floor(d.ev.ms / 60000);
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(i);
     });
@@ -6410,7 +6570,7 @@ function renderCioMiniList(openWithAge){
   // its half dots with, so the two can never disagree.
   const trips = cioTripIndex();
   const sessions = cioSessionMap();
-  const tripOf = (c) => trips[c.checkoutId || c.id];
+  const tripOf = (c) => trips[cioRowLoanKey(c)];
   // How many of a trip are STILL out, now.
   const stillOut = (trip) => trip ? trip.size - cioTripReturnedBy(trip, sessions, Infinity) : 0;
   const partialNote = (trip) => {
