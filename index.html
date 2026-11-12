@@ -297,17 +297,19 @@
 
   /* Moderator activity timeline — one row per moderator, x-axis is time of
      day for whichever day is selected via the ‹/› day-picker. A thin grey
-     baseline runs the length of the row; a yellow dot appears at the exact
-     moment that mod checks something out, a green dot at the exact moment
-     they check it back in — hover a dot for the precise timestamp, click it
-     for the gear in that event. Two events closer than a dot-width are eased
+     baseline runs the length of the row. A checkout and a check-in in the
+     same clock minute collapse to one dot (yellow out, green in) with the
+     item count drawn inside it; a single item stays a plain dot. Hover names
+     the time and the count, click lists every item. Two batches closer than
+     a dot-width — a checkout and the check-in a minute later — are eased
      apart along the line so both stay visible; the tooltip still names the
      real time. Defaults to a 7 AM–12 AM window (the "Show full 24 hours"
      checkbox reveals anything outside it); a small clock badge on a name
      flags activity that's currently hidden by that window. Gear that was
      already out at midnight keeps the pinned start-of-day dot, drawn with a
      red ring (and a small "overnight" label) so it isn't just another
-     checkout; the return that closes that loan gets the same ring. */
+     checkout; the return that closes that loan gets the same ring, on the
+     whole batch dot if any item in it was overnight. */
   /* The section <summary> names this panel now, so the head carries the day
      nav, the 24-hour toggle, and the per-day overnight count. */
   .cio-timeline-head{display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;}
@@ -340,10 +342,16 @@
   .cio-timeline-offhours{font-size:10px;cursor:help;margin-left:2px;}
   .cio-timeline-track{position:relative;flex:1;height:18px;}
   .cio-timeline-baseline{position:absolute;left:0;right:0;top:50%;height:3px;border-radius:2px;background:var(--sub);opacity:.3;transform:translateY(-50%);}
-  .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;touch-action:manipulation;}
-  /* A slightly larger hit target for taps. Kept inside the gap the nudge
-     leaves between neighbours (diameter + 2px), so a tap still lands on the
-     dot you aimed at when two events sit side by side. */
+  .cio-timeline-dot{position:absolute;top:50%;width:11px;height:11px;border-radius:50%;transform:translate(-50%,-50%);cursor:pointer;box-shadow:0 0 0 2px var(--panel);z-index:1;touch-action:manipulation;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;user-select:none;}
+  /* A batch of two or more scans is one dot with the count inside. One digit
+     fits a slightly larger circle; two digits grow it again. A single item
+     stays the plain 11px dot — a "1" in there just reads as noise. */
+  .cio-timeline-dot.counted{width:20px;height:20px;}
+  .cio-timeline-dot.counted.wide{width:26px;height:26px;font-size:11px;}
+  .cio-timeline-dot.counted.xwide{width:auto;min-width:32px;height:26px;padding:0 6px;border-radius:999px;font-size:11px;}
+  /* A slightly larger hit target for taps. The nudge separates neighbours by
+     each dot's own width plus 2px, so a tap still lands on the batch you
+     aimed at when a checkout and a check-in sit side by side. */
   .cio-timeline-dot::before{content:"";position:absolute;inset:-3px;}
   .cio-timeline-dot.yellow{background:#d97706;}
   .cio-timeline-dot.green{background:#16a34a;}
@@ -5742,22 +5750,26 @@ function renderCioIssues(){
   }).join("");
 }
 
-// Close events land on the same pixel: a checkout and its return 30 seconds
+// Close batches land on the same pixel: a checkout and its return a minute
 // later is a fraction of one dot on both the 7 AM–midnight axis and the full
 // day, so the later dot paints over the earlier one. After each dot's ideal
 // x (a fraction of the track) is known, walk the row in time order. A centre
-// closer than one diameter plus a 2px gap is pushed right to
-// previous + diameter + gap. If that would run past the right edge, the
-// packed cluster slides left instead, so the dots stay side by side on the
-// line and the earlier event stays on the left. Returns a pixel offset per
-// input dot (placed centre minus ideal centre).
-function cioTimelineDotOffsets(dots, trackWidth, minSep){
+// closer than the two dots' own half-widths plus a 2px gap is pushed right.
+// Counted batch dots are wider than a single-item dot, so the gap is measured
+// from each dot's real width rather than one shared diameter. If that would
+// run past the right edge, the packed cluster slides left instead, so the
+// dots stay side by side on the line and the earlier batch stays on the left.
+// Returns a pixel offset per input dot (placed centre minus ideal centre).
+function cioTimelineDotOffsets(dots, trackWidth){
+  const GAP = 2;
   const offsets = dots.map(() => 0);
-  if (!dots.length || !(trackWidth > 0) || !(minSep > 0)) return offsets;
+  if (!dots.length || !(trackWidth > 0)) return offsets;
+  const sepBetween = (a, b) => a.half + b.half + GAP;
   const items = dots.map((d, i) => {
     const frac = +d.frac || 0;
+    const width = +d.width > 0 ? +d.width : 11;
     const ideal = frac * trackWidth;
-    return { i, frac, ideal, x: ideal };
+    return { i, frac, ideal, x: ideal, half: width / 2 };
   });
   items.sort((a, b) => a.frac - b.frac || a.i - b.i);
 
@@ -5765,12 +5777,13 @@ function cioTimelineDotOffsets(dots, trackWidth, minSep){
   for (let i = 0; i < items.length; i++){
     if (i === 0){ clusterStart = 0; continue; }
     const prev = items[i - 1];
-    if (items[i].ideal >= prev.x + minSep){
+    const sep = sepBetween(prev, items[i]);
+    if (items[i].ideal >= prev.x + sep){
       items[i].x = items[i].ideal;
       clusterStart = i;
       continue;
     }
-    const shifted = prev.x + minSep;
+    const shifted = prev.x + sep;
     if (shifted <= trackWidth){
       items[i].x = shifted;
       continue;
@@ -5778,11 +5791,11 @@ function cioTimelineDotOffsets(dots, trackWidth, minSep){
     // Right edge: pack this cluster back onto the track, last dot on the edge.
     let start = clusterStart;
     const place = (from) => {
-      const count = i - from + 1;
-      for (let k = 0; k < count; k++) items[i - k].x = trackWidth - k * minSep;
+      items[i].x = trackWidth;
+      for (let k = i; k > from; k--) items[k - 1].x = items[k].x - sepBetween(items[k - 1], items[k]);
     };
     place(start);
-    while (start > 0 && items[start].x < items[start - 1].x + minSep){
+    while (start > 0 && items[start].x < items[start - 1].x + sepBetween(items[start - 1], items[start])){
       start--;
       place(start);
     }
@@ -5790,8 +5803,8 @@ function cioTimelineDotOffsets(dots, trackWidth, minSep){
     // More dots than the row can hold. Pin the earliest to the left edge and
     // keep them in time order; the surplus hangs off the right.
     if (items[start].x < 0){
-      const count = i - start + 1;
-      for (let k = 0; k < count; k++) items[start + k].x = k * minSep;
+      items[start].x = 0;
+      for (let k = start + 1; k <= i; k++) items[k].x = items[k - 1].x + sepBetween(items[k - 1], items[k]);
     }
   }
   items.forEach(it => { offsets[it.i] = it.x - it.ideal; });
@@ -5817,10 +5830,11 @@ function cioSpreadTimelineDots(){
     const width = track.getBoundingClientRect().width;
     const dotEls = Array.from(track.querySelectorAll(".cio-timeline-dot"));
     if (!dotEls.length || !(width > 0)) return;
-    const diam = dotEls[0].offsetWidth || 11;
-    const minSep = diam + 2;
-    const dots = dotEls.map(el => ({ frac: parseFloat(el.getAttribute("data-frac")) || 0 }));
-    const offsets = cioTimelineDotOffsets(dots, width, minSep);
+    const dots = dotEls.map(el => ({
+      frac: parseFloat(el.getAttribute("data-frac")) || 0,
+      width: el.offsetWidth || 11
+    }));
+    const offsets = cioTimelineDotOffsets(dots, width);
     dotEls.forEach((el, i) => { el.style.left = cioTimelineDotLeft(dots[i].frac, offsets[i]); });
   });
   // Nudging moves the dot the popover is glued to. Follow it; a detached
@@ -6029,15 +6043,15 @@ function cioShowDotPop(dot){
   cioPlaceDotPop(dot);
 }
 
-// A per-moderator, per-day timeline: a dot lands at the exact moment that
-// mod's checkout event happened (yellow) or their matching checkin happened
-// (green), against a plain grey baseline — hover a dot for the exact time,
-// click or tap it for the gear. Dots closer than their own width are then
-// eased apart by cioSpreadTimelineDots (same path for the 7 AM–midnight
-// window and the full day). Anything outside the visible window still gets a
-// small badge on that mod's name rather than silently vanishing. Respects the
-// Project filter and the day picked via the ‹/› buttons (cioTimelineDate,
-// never later than today).
+// A per-moderator, per-day timeline: one dot per batch — same action, same
+// clock minute — yellow for a checkout, green for a check-in, against a plain
+// grey baseline. The count sits inside the dot when the batch has more than
+// one item. Hover names the time and the count; click or tap lists the gear.
+// Batches closer than their own widths are then eased apart by
+// cioSpreadTimelineDots (same path for the 7 AM–midnight window and the full
+// day). Anything outside the visible window still gets a small badge on that
+// mod's name rather than silently vanishing. Respects the Project filter and
+// the day picked via the ‹/› buttons (cioTimelineDate, never later than today).
 function renderCioModTimeline(){
   cioHideDotPop();
   cioTlDotPayloads = [];
@@ -6258,7 +6272,7 @@ function renderCioModTimeline(){
       const heldEntries = base.map(s => ({
         outMs: s.outMs, out: s.out, back: s.back, partner: otherName(s.out, name)
       }));
-      dots.push({ frac: 0, color: "yellow", pinned: true, overnight: true,
+      dots.push({ frac: 0, color: "yellow", pinned: true, overnight: true, count: n,
         label: open.length
           ? `Still out — ${items}, oldest checked out ${whenLabel}${withLabel}`
           : `Already out at the start of the day — ${items} checked out ${whenLabel}${withLabel}, returned ${today ? "today" : "later that day"}`,
@@ -6288,10 +6302,12 @@ function renderCioModTimeline(){
       }
       eventDots.push({ frac: axisFrac, color, label, overnight: !!ev.overnightClose, ev });
     });
-    // Same moderator (this row), same action, same clock minute: one popover,
-    // even though the dots themselves stay separate so a close check-in and
-    // check-out can still be nudged apart. A minute is what lands on the same
-    // pixel before that nudge.
+    // One dot per batch. Same moderator (this row), same action, same clock
+    // minute — the grouping the popover already used — so a six-item return
+    // is a single green dot reading "6", not six dots shoulder to shoulder.
+    // A checkout and a check-in stay two dots even inside that minute, and
+    // the nudge keeps those from painting over each other. The dot sits on
+    // the first scan in the batch; within one minute that is the same pixel.
     const buckets = new Map();
     eventDots.forEach((d, i) => {
       const key = d.ev.type + "\u0000" + Math.floor(d.ev.ms / 60000);
@@ -6299,20 +6315,52 @@ function renderCioModTimeline(){
       buckets.get(key).push(i);
     });
     buckets.forEach(idxs => {
-      const payload = cioTlPayloadFromEvents(idxs.map(i => eventDots[i].ev), name);
-      idxs.forEach(i => { eventDots[i].payload = payload; });
+      const members = idxs.map(i => eventDots[i]);
+      const count = members.length;
+      const payload = cioTlPayloadFromEvents(members.map(d => d.ev), name);
+      const overnight = members.some(d => d.overnight);
+      // A mixed minute (one trip finished, another still partly out) keeps
+      // the half-dot, since "everything came back" would be the wrong read.
+      const color = members[0].ev.type === "checkout" ? "yellow"
+        : (members.some(d => d.color === "partial") ? "partial" : "green");
+      let label = members[0].label;
+      if (count > 1){
+        const partners = [...new Set(members.map(d => otherName(d.ev.row, name)).filter(Boolean))];
+        const withName = partners.length === 1 ? partners[0] : "";
+        const when = timeFmt(members[0].ev.row.ts);
+        if (members[0].ev.type === "checkout"){
+          label = `Checked out ${count} items · ${when}${withName ? ` (with ${withName})` : ""}`;
+        } else {
+          const returners = [...new Set(members.map(d => d.ev.returnedBy).filter(Boolean))];
+          label = `Checked back in ${count} items · ${when}`
+            + (returners.length === 1 ? ` by ${returners[0]}` : (withName ? ` (with ${withName})` : ""));
+          const flagged = members.filter(d => d.ev.partial && d.ev.tripSize > 1);
+          if (flagged.length && flagged.every(d => d.ev.tripSize === flagged[0].ev.tripSize && d.ev.tripBack === flagged[0].ev.tripBack)){
+            const p = flagged[0].ev;
+            label += ` — ${p.tripBack} of ${p.tripSize} returned, ${p.tripSize - p.tripBack} still out`;
+          } else if (!flagged.length && members[0].ev.tripSize > 1 && members.every(d => d.ev.tripSize === members[0].ev.tripSize && !d.ev.partial)){
+            label += ` — completes the batch of ${members[0].ev.tripSize}`;
+          }
+        }
+      }
+      dots.push({ frac: members[0].frac, color, label, overnight, count, payload });
     });
-    eventDots.forEach(d => dots.push(d));
     return { name, dots, hasOffWindow, overnight: m.held.length > 0 };
   });
 
   const dotHtml = (d) => {
     const idx = cioTlDotPayloads.length;
     cioTlDotPayloads.push(d.payload || { groups: [] });
+    const count = d.count || 0;
     const cls = ["cio-timeline-dot", d.color];
     if (d.overnight) cls.push("overnight");
     if (d.pinned) cls.push("pinned");
-    return `<span class="${cls.join(" ")}" style="left:${(d.frac * 100).toFixed(3)}%;" data-frac="${d.frac}" data-tip="${escapeHtmlCio(d.label)}" data-dot="${idx}" role="button" tabindex="0" aria-label="${escapeHtmlCio(d.label)}"></span>`;
+    // No digit on a single item — the plain dot already says "one".
+    if (count > 1) cls.push("counted");
+    if (count >= 10) cls.push("wide");
+    if (count >= 100) cls.push("xwide");
+    const num = count > 1 ? String(count) : "";
+    return `<span class="${cls.join(" ")}" style="left:${(d.frac * 100).toFixed(3)}%;" data-frac="${d.frac}" data-count="${count}" data-tip="${escapeHtmlCio(d.label)}" data-dot="${idx}" role="button" tabindex="0" aria-label="${escapeHtmlCio(d.label)}">${num}</span>`;
   };
   listEl.innerHTML = rows.map(r => `
     <div class="cio-timeline-row">
