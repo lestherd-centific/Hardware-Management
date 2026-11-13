@@ -378,25 +378,31 @@
   /* Click/tap a dot. Lives on <body> for the same reason the tooltip does:
      the timeline list scrolls, and a scroll container would clip a popover
      that hangs off the top row. */
-  .cio-tl-pop{position:fixed;z-index:30;width:min(320px,calc(100vw - 16px));max-height:min(360px,calc(100vh - 16px));overflow:auto;background:var(--panel);color:var(--ink);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px rgba(28,27,41,.18);padding:10px 12px;font-size:12px;}
+  .cio-tl-pop{position:fixed;z-index:30;width:min(440px,calc(100vw - 16px));max-height:min(360px,calc(100vh - 16px));overflow:auto;background:var(--panel);color:var(--ink);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 28px rgba(28,27,41,.18);padding:10px 12px;font-size:12px;}
   .cio-tl-pop[hidden]{display:none;}
   .cio-tl-pop-block + .cio-tl-pop-block{margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+  .cio-tl-pop .act-line{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
   .cio-tl-pop .act{font-weight:700;font-size:12.5px;}
   .cio-tl-pop .act.checkout{color:#d97706;}
   .cio-tl-pop .act.checkin{color:var(--st-inuse);}
   .cio-tl-pop .act.still{color:var(--st-broken);}
+  .cio-tl-pop .total{color:var(--sub);font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
   .cio-tl-pop .when{color:var(--sub);font-size:11.5px;margin-top:2px;}
   .cio-tl-pop .who{margin-top:4px;font-weight:600;}
   .cio-tl-pop .who .k{display:inline-block;min-width:76px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--sub);}
   .cio-tl-pop .note{margin-top:6px;font-size:11.5px;color:var(--sub);}
-  .cio-tl-pop ul{list-style:none;margin:8px 0 0;padding:0;border-top:1px solid var(--border);}
-  .cio-tl-pop li{padding:6px 0;border-bottom:1px solid var(--border);}
+  .cio-tl-pop .pair{margin-top:8px;}
+  .cio-tl-pop .pair-head{font-size:11.5px;font-weight:700;background:var(--hover-bg);border-radius:6px;padding:5px 8px;}
+  .cio-tl-pop ul{list-style:none;margin:2px 0 0;padding:0;border-top:none;}
+  .cio-tl-pop li{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);}
   .cio-tl-pop li:last-child{border-bottom:none;}
+  .cio-tl-pop .item-main{flex:1;min-width:0;}
   .cio-tl-pop .eq{display:flex;align-items:baseline;gap:6px;}
   .cio-tl-pop .tag{font-weight:700;}
   .cio-tl-pop .model{color:var(--sub);font-weight:500;min-width:0;}
   .cio-tl-pop .at{margin-left:auto;color:var(--sub);font-size:11.5px;font-variant-numeric:tabular-nums;white-space:nowrap;}
   .cio-tl-pop .meta{color:var(--sub);font-size:11.5px;margin-top:1px;overflow-wrap:anywhere;}
+  .cio-tl-pop .pill{flex:0 1 auto;align-self:center;max-width:46%;background:var(--hover-bg);color:var(--ink);border:1px solid var(--border);border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .cio-timeline-now{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--c-violet);}
   .cio-timeline-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-size:11.5px;color:var(--sub);}
   .cio-timeline-legend span{display:inline-flex;align-items:center;gap:5px;}
@@ -1285,7 +1291,7 @@ const ICON_HW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" str
 // closing exactly the gap that let an old, unpatched tab keep silently
 // wiping Excel even after lastKnownGoodCounts/looksLikeBrokenEmptyRead were
 // added to fix that failure mode for any *newly loaded* tab.
-const APP_VERSION = "2026-09-18-3";
+const APP_VERSION = "2026-11-13-1";
 let versionStale = false;
 
 const EXCEL_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
@@ -6051,29 +6057,88 @@ function cioTlDateLabel(ms, dayStart){
     ? { month: "short", day: "numeric" }
     : { month: "short", day: "numeric", year: "numeric" });
 }
+function cioTlCountPhrase(n){
+  return n + (n === 1 ? " item" : " items");
+}
+function cioNamesEqual(a, b){
+  const x = String(a || "").trim().toLowerCase();
+  return !!x && x === String(b || "").trim().toLowerCase();
+}
+// Perspective for one log row drawn on one timeline track. `actionRow` is
+// the checkout or check-in the dot marks; `pairRow` is the checkout the loan
+// went out on (the same row, for a checkout). A moderator who only appears
+// in `partner` still gets the dot. On their track the popover names the
+// person who performed the action; on the actor's track it names the partner.
+// Display only — this never adds a session, a KPI, or a checked-out row.
+function cioTlSides(actionRow, pairRow, viewer){
+  const actor = String((actionRow && actionRow.modName) || "").trim();
+  const listedAsPartner = [actionRow, pairRow].some(row =>
+    row && String(row.partner || "").trim()
+    && cioNamesEqual(row.partner, viewer)
+    && !cioNamesEqual(row.modName, viewer));
+  const viewerIsPartner = !cioNamesEqual(viewer, actor) && listedAsPartner;
+  if (viewerIsPartner) return { actorName: actor, viewerIsPartner: true, partner: actor };
+  // The other person on the loan. Prefer the checkout row: a colleague who
+  // only typed the return is "returned by", not the partner on this kit.
+  const otherOn = (row) => {
+    if (!row) return "";
+    const mod = String(row.modName || "").trim();
+    const partner = String(row.partner || "").trim();
+    if (cioNamesEqual(mod, viewer)) return partner && !cioNamesEqual(partner, viewer) ? partner : "";
+    if (cioNamesEqual(partner, viewer)) return mod && !cioNamesEqual(mod, viewer) ? mod : "";
+    return "";
+  };
+  return { actorName: actor, viewerIsPartner: false, partner: otherOn(pairRow) || otherOn(actionRow) };
+}
+// Section inside one dot. The dot stays one 10-minute chain; the list is
+// split by who the row's moderator was paired with. Solo gear has no pill.
+function cioTlPairMeta(ev, action){
+  const actor = String(ev.actorName || "").trim();
+  const other = String(ev.partner || "").trim();
+  if (ev.viewerIsPartner && actor){
+    const verb = action === "checkin" ? "Checked in by " : "Checked out by ";
+    return { key: "by\u0000" + actor.toLowerCase(), head: verb + actor, pill: "w/ " + actor };
+  }
+  if (other) return { key: "with\u0000" + other.toLowerCase(), head: "With " + other, pill: "w/ " + other };
+  return { key: "solo", head: "Solo", pill: "" };
+}
 // One block of the popover: one timeline dot, one moderator.
 function cioTlGroupShell(evs, moderator, action, actionLabel){
-  const partners = new Set(evs.map(e => e.partner || ""));
-  const onePartner = partners.size === 1 ? [...partners][0] : "";
   const returners = [...new Set(evs.map(e => e.returnedBy || "").filter(Boolean))];
   const loans = evs.map(e => e.loanLabel || "");
   const showLoan = new Set(loans.filter(Boolean)).size > 1;
+  const partnerView = evs.length > 0 && evs.every(e => e.viewerIsPartner);
+  // One "Returned by" line only when every item in the dot was handed back
+  // by that same person. A mix (some returned by the row's moderator, one
+  // by a colleague) stays on the item it belongs to.
+  const sameReturner = returners.length === 1 && evs.every(e => e.returnedBy === returners[0]);
+  const sections = [];
+  const byKey = new Map();
+  evs.forEach((e, i) => {
+    const meta = cioTlPairMeta(e, action);
+    let bucket = byKey.get(meta.key);
+    if (!bucket){
+      bucket = { head: meta.head, items: [] };
+      byKey.set(meta.key, bucket);
+      sections.push(bucket);
+    }
+    const it = Object.assign({}, e.item || {});
+    it.at = cioTlExactTime(e.ms);
+    if (showLoan && loans[i]) it.loan = loans[i];
+    if (e.batchLabel) it.batch = e.batchLabel;
+    if (meta.pill) it.pill = meta.pill;
+    if (!e.viewerIsPartner && !sameReturner && e.returnedBy) it.returnedBy = e.returnedBy;
+    bucket.items.push(it);
+  });
+  sections.forEach(s => { s.label = s.head + " · " + cioTlCountPhrase(s.items.length); });
   return {
     action, actionLabel,
     timeLabel: cioTlTimeSpan(evs.map(e => e.ms)),
     moderator,
-    partner: onePartner,
-    returnedBy: returners.length === 1 ? returners[0] : "",
+    returnedBy: !partnerView && sameReturner ? returners[0] : "",
     note: "",
-    items: evs.map((e, i) => {
-      const it = Object.assign({}, e.item || {});
-      it.at = cioTlExactTime(e.ms);
-      if (showLoan && loans[i]) it.loan = loans[i];
-      if (e.batchLabel) it.batch = e.batchLabel;
-      if (!onePartner && e.partner) it.partner = e.partner;
-      if (returners.length > 1 && e.returnedBy) it.returnedBy = e.returnedBy;
-      return it;
-    })
+    totalLabel: cioTlCountPhrase(evs.length),
+    sections
   };
 }
 function cioTlPayloadFromEvents(evs, moderator){
@@ -6121,6 +6186,8 @@ function cioTlPayloadFromHeld(entries, moderator, dayStart){
     const asEvents = list.map(e => ({
       ms: e.outMs,
       partner: e.partner || "",
+      actorName: e.actorName || "",
+      viewerIsPartner: !!e.viewerIsPartner,
       loanLabel: cioTlLoanBit(e.out),
       item: cioTlGearItem(e.out, e.back || null)
     }));
@@ -6130,31 +6197,35 @@ function cioTlPayloadFromHeld(entries, moderator, dayStart){
 }
 function cioTlPopHtml(payload){
   return (payload.groups || []).map(g => {
-    const items = (g.items || []).map(it => {
-      const bits = [];
-      if (it.serial) bits.push("S/N " + it.serial);
-      if (it.condition) bits.push(it.condition);
-      if (it.destination) bits.push("→ " + it.destination);
-      const extra = [
-        it.partner ? "with " + it.partner : "",
-        it.returnedBy ? "returned by " + it.returnedBy : ""
-      ].filter(Boolean).join(" · ");
-      const loanBits = [it.loan, it.batch].filter(Boolean).join(" · ");
-      return `<li>
-        <div class="eq"><span class="tag">${escapeHtmlCio(it.tag || "—")}</span>${it.model ? `<span class="model">${escapeHtmlCio(it.model)}</span>` : ""}${it.at ? `<span class="at">${escapeHtmlCio(it.at)}</span>` : ""}</div>
-        ${bits.length ? `<div class="meta">${escapeHtmlCio(bits.join(" · "))}</div>` : ""}
-        ${loanBits ? `<div class="meta">${escapeHtmlCio(loanBits)}</div>` : ""}
-        ${extra ? `<div class="meta">${escapeHtmlCio(extra)}</div>` : ""}
-      </li>`;
+    const body = (g.sections || []).map(sec => {
+      const items = (sec.items || []).map(it => {
+        const bits = [];
+        if (it.serial) bits.push("S/N " + it.serial);
+        if (it.condition) bits.push(it.condition);
+        if (it.destination) bits.push("→ " + it.destination);
+        const loanBits = [it.loan, it.batch].filter(Boolean).join(" · ");
+        const pill = it.pill
+          ? `<span class="pill" title="${escapeHtmlCio(it.pill)}">${escapeHtmlCio(it.pill)}</span>`
+          : "";
+        return `<li>
+          <div class="item-main">
+            <div class="eq"><span class="tag">${escapeHtmlCio(it.tag || "—")}</span>${it.model ? `<span class="model">${escapeHtmlCio(it.model)}</span>` : ""}${it.at ? `<span class="at">${escapeHtmlCio(it.at)}</span>` : ""}</div>
+            ${bits.length ? `<div class="meta">${escapeHtmlCio(bits.join(" · "))}</div>` : ""}
+            ${loanBits ? `<div class="meta">${escapeHtmlCio(loanBits)}</div>` : ""}
+            ${it.returnedBy ? `<div class="meta">${escapeHtmlCio("returned by " + it.returnedBy)}</div>` : ""}
+          </div>
+          ${pill}
+        </li>`;
+      }).join("");
+      return `<div class="pair"><div class="pair-head">${escapeHtmlCio(sec.label || "")}</div><ul>${items}</ul></div>`;
     }).join("");
     return `<section class="cio-tl-pop-block">
-      <div class="act ${escapeHtmlCio(g.action)}">${escapeHtmlCio(g.actionLabel || "")}</div>
+      <div class="act-line"><div class="act ${escapeHtmlCio(g.action)}">${escapeHtmlCio(g.actionLabel || "")}</div>${g.totalLabel ? `<div class="total">${escapeHtmlCio(g.totalLabel)}</div>` : ""}</div>
       <div class="when">${escapeHtmlCio(g.timeLabel || "")}</div>
       <div class="who"><span class="k">Moderator</span> ${escapeHtmlCio(g.moderator || "")}</div>
-      ${g.partner ? `<div class="who"><span class="k">Partner</span> ${escapeHtmlCio(g.partner)}</div>` : ""}
       ${g.returnedBy ? `<div class="who"><span class="k">Returned by</span> ${escapeHtmlCio(g.returnedBy)}</div>` : ""}
       ${g.note ? `<div class="note">${escapeHtmlCio(g.note)}</div>` : ""}
-      <ul>${items}</ul>
+      ${body}
     </section>`;
   }).join("");
 }
@@ -6246,9 +6317,10 @@ const CIO_TIMELINE_DOT_GAP_MS = 10 * 60 * 1000;
 
 // Display grouping for one moderator's visible dots. `eventDots` is in time
 // order. Checkout and check-in are separate chains, so a return never joins
-// a checkout. Shared checkoutIds, one-id-per-device rows, and rows with no
-// checkoutId all use this one rule. The pinned start-of-day marker is not
-// in this list.
+// a checkout. Partner is not a split: two pairings inside the window stay
+// one dot, and the popover groups the list. Shared checkoutIds,
+// one-id-per-device rows, and rows with no checkoutId all use this one rule.
+// The pinned start-of-day marker is not in this list.
 function cioTlChainEventDots(eventDots){
   const open = { checkout: null, checkin: null };
   const groups = [];
@@ -6383,10 +6455,15 @@ function renderCioModTimeline(){
       outNames.forEach(n => {
         const m = slot(n);
         if (!m) return;
+        // Same session copied onto the partner's track. Counts and the
+        // checked-out list read sessions, not these display dots.
+        const side = cioTlSides(s.out, s.out, n);
         m.events.push({
           ms: s.outMs, type: "checkout", row: s.out,
           item: cioTlGearItem(s.out),
-          partner: otherName(s.out, n),
+          partner: side.partner,
+          actorName: side.actorName,
+          viewerIsPartner: side.viewerIsPartner,
           returnedBy: "", partial: false, tripSize: 0, tripBack: 0, overnightClose: false
         });
       });
@@ -6415,10 +6492,12 @@ function renderCioModTimeline(){
         if (!m) return;
         const byOther = !backNames.some(b => b.toLowerCase() === key);
         const pairRow = s.out || s.back;
-        const onPair = rowNames(pairRow).some(p => p.toLowerCase() === key);
+        const side = cioTlSides(s.back, pairRow, n);
         m.events.push({ ms: s.backMs, type: "checkin", row: s.back,
                         item: cioTlGearItem(s.back, s.out || null),
-                        partner: onPair ? otherName(pairRow, n) : "",
+                        partner: side.partner,
+                        actorName: side.actorName,
+                        viewerIsPartner: side.viewerIsPartner,
                         returnedBy: byOther ? String(s.back.modName || "").trim() : "",
                         partial: isPartial, tripSize: trip ? trip.size : 0, tripBack: backByThen,
                         // Closes a loan that was already out at this day's midnight.
@@ -6513,9 +6592,13 @@ function renderCioModTimeline(){
       const withName = otherName(oldest.out, name);
       const withLabel = withName ? ` (with ${withName})` : "";
       const items = `${n} item${n === 1 ? "" : "s"}`;
-      const heldEntries = base.map(s => ({
-        outMs: s.outMs, out: s.out, back: s.back, partner: otherName(s.out, name)
-      }));
+      const heldEntries = base.map(s => {
+        const side = cioTlSides(s.out, s.out, name);
+        return {
+          outMs: s.outMs, out: s.out, back: s.back,
+          partner: side.partner, actorName: side.actorName, viewerIsPartner: side.viewerIsPartner
+        };
+      });
       dots.push({ frac: 0, color: "yellow", pinned: true, overnight: true, count: n,
         label: open.length
           ? `Still out — ${items}, oldest checked out ${whenLabel}${withLabel}`
